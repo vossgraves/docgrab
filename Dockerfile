@@ -20,6 +20,7 @@ COPY index.html .
 
 RUN mkdir -p downloads
 
-EXPOSE 5000
+ENV PORT=8080
+EXPOSE 8080
 
-CMD ["gunicorn", "server:app", "--bind", "0.0.0.0:5000", "--timeout", "300", "--workers", "2"]
+CMD gunicorn server:app --bind 0.0.0.0:${PORT} --timeout 600 --workers 1
