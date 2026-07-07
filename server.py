@@ -203,10 +203,28 @@ def _find_chrome():
         path = shutil.which(name)
         if path:
             return path
-    for p in ['/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome',
-              '/data/data/com.termux/files/usr/bin/chromium-browser']:
-        if os.path.isfile(p):
-            return p
+    candidates = [
+        # Windows
+        os.path.expandvars(r'%ProgramFiles%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%LocalAppData%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%ProgramFiles%\Chromium\Application\chrome.exe'),
+        os.path.expandvars(r'%LocalAppData%\Chromium\Application\chrome.exe'),
+        # macOS
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        # Linux
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/snap/bin/chromium',
+        # Termux
+        '/data/data/com.termux/files/usr/bin/chromium-browser',
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
     return None
 
 
