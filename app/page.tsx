@@ -1,7 +1,7 @@
 import { Downloader } from "@/components/downloader"
 import { History } from "@/components/history"
 
-const GITHUB_URL = process.env.NEXT_PUBLIC_GITHUB_URL || "https://github.com/KgisGrade/docgrab-mhsm"
+const GITHUB_URL = process.env.NEXT_PUBLIC_GITHUB_URL || "https://github.com/vossgraves/docgrab"
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://docgrab.vercel.app"
 
 const jsonLd = {
