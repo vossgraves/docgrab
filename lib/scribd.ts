@@ -2,6 +2,7 @@ import { launchBrowser } from "./browser"
 import { storeForDownload } from "./delivery"
 import { getUserAgent } from "./user-agent"
 import { downloadPublicDocument } from "./public-document"
+import { fetchImpersonated, isChallengePage } from "./impersonate"
 import type { Page } from "puppeteer-core"
 import type { Logger, ProgressReporter, DownloadOptions, OutputFormat } from "./types"
 
@@ -136,6 +137,42 @@ export async function downloadScribd(
     return (await fetchOne(withoutToken)) ?? (await fetchOne(rawUrl))
   }
 
+  // The embed HTML is the only part of the flow that Fastly gates. Try to
+  // fetch it from Node before spinning up the browser dance: plain fetch
+  // first (works when the CDN serves the embed directly), then a Chrome-TLS
+  // impersonated request (defeats the _fs-ch client-challenge shell without
+  // waiting for a browser challenge to auto-resolve). Returns real HTML or
+  // null when the embed is unreachable/challenged from this network.
+  const fetchEmbedHtml = async (): Promise<string | null> => {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 30000)
+      try {
+        const res = await fetch(embedUrl, {
+          headers: { "User-Agent": getUserAgent(), Accept: "*/*" },
+          signal: controller.signal,
+        })
+        const text = res.ok ? await res.text() : ""
+        if (text.trim().length > 0 && !isChallengePage(text)) {
+          log("info", "Embed HTML fetched directly, no challenge")
+          return text
+        }
+      } catch {
+        // fall through to impersonated fetch
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch {
+      // fall through to impersonated fetch
+    }
+    const impersonated = await fetchImpersonated(embedUrl, log, 30000)
+    if (impersonated && !isChallengePage(impersonated.buffer.toString("utf8"))) {
+      log("success", "Embed HTML retrieved via Chrome TLS fingerprint (no browser challenge)")
+      return impersonated.buffer.toString("utf8")
+    }
+    return null
+  }
+
   let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null
   try {
     log("step", "Launching headless browser...")
@@ -157,25 +194,33 @@ export async function downloadScribd(
       request.continue().catch(() => {})
     })
 
-    // Load the embed directly: the page definitions and their JSONP payloads
-    // live on Scribd's public CDN and need no session cookie. Only when Fastly
-    // answers with a client-challenge shell does the session need priming via
-    // the document page (the challenge cookie lands there), then reload.
+    // Load the embed: the page definitions and their JSONP payloads live on
+    // Scribd's public CDN and need no session cookie. When the pre-fetched
+    // HTML made it past Fastly, hand it straight to the browser — no
+    // challenge wait. Otherwise fall back to a real navigation, priming the
+    // session via the document page only if Fastly answers with a
+    // client-challenge shell, then reload.
     log("info", `Loading embed page: ${embedUrl}`)
-    await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
-    await waitMillis(2500)
-    if (await isChallengeShell(page)) {
-      log("info", "Embed is behind a client challenge; priming session via the document page...")
-      const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 25000)
-      if (!primed) {
-        return {
-          error:
-            "Scribd's anti-bot challenge did not auto-resolve from this server's network. DocGrab does not attempt to solve CAPTCHAs or bypass login or paywalls, so this document cannot be downloaded right now. Try again later.",
-        }
-      }
-      log("success", "Client challenge passed, session primed")
+    const embedHtml = await fetchEmbedHtml()
+    if (embedHtml) {
+      await page.setContent(embedHtml, { waitUntil: "domcontentloaded", timeout: 60000 })
+      await waitMillis(1200)
+    } else {
       await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
-      await waitMillis(2500)
+      await waitMillis(1200)
+      if (await isChallengeShell(page)) {
+        log("info", "Embed is behind a client challenge; priming session via the document page...")
+        const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 25000)
+        if (!primed) {
+          return {
+            error:
+              "Scribd's anti-bot challenge did not auto-resolve from this server's network. DocGrab does not attempt to solve CAPTCHAs or bypass login or paywalls, so this document cannot be downloaded right now. Try again later.",
+          }
+        }
+        log("success", "Client challenge passed, session primed")
+        await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
+        await waitMillis(1200)
+      }
     }
 
     // Scribd's embed shows an explicit "unavailable" panel for documents the
@@ -256,7 +301,7 @@ export async function downloadScribd(
             emptyChecks = 0
             log("warn", `Embed still behind the client challenge, reloading (attempt ${embedReloads})...`)
             await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
-            await waitMillis(3000)
+            await waitMillis(2000)
             continue
           }
           if (embedState.pageDefs === 0) {
@@ -300,11 +345,11 @@ export async function downloadScribd(
           for (const selector of selectors) document.querySelectorAll(selector).forEach((node) => nodes.add(node))
           Array.from(nodes)[idx]?.scrollIntoView({ behavior: "instant" as ScrollBehavior, block: "center" })
         }, i)
-        await new Promise((r) => setTimeout(r, 100))
+        await new Promise((r) => setTimeout(r, 70))
       }
       scrolled = total
       pageCount = total
-      await new Promise((r) => setTimeout(r, 450))
+      await new Promise((r) => setTimeout(r, 350))
     }
     if (pageCount === 0) {
       if (embedState.pageDefs === 0) {
