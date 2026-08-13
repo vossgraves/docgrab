@@ -35,18 +35,29 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-/** Fetch the SlideShare page HTML using direct fetch, then normal browser rendering. */
+/**
+ * Fetch SlideShare HTML through the fast direct path first. SlideShare sometimes
+ * returns a small challenge/app shell to non-browser clients that is large
+ * enough to look valid but contains none of the slide assets. In that case,
+ * fall back to browser rendering so public decks are not falsely reported as
+ * private or invalid. Real asset-bearing pages still avoid the browser startup.
+ */
 async function fetchPageHtml(url: string, log: Logger): Promise<string | null> {
   try {
     log("info", "Fetching page directly...")
     const resp = await fetchWithTimeout(url, { headers: { "User-Agent": getUserAgent(), Accept: "text/html" } }, 20000)
     if (resp.ok) {
       const html = await resp.text()
-      if (html.length > 1000) {
-        log("success", "Direct fetch returned public page HTML")
+      const hasSlideAssets = /image\.slidesharecdn\.com\//i.test(html) || /slidesharecdn\.com\//i.test(html)
+      if (html.length > 1000 && hasSlideAssets) {
+        log("success", "Direct fetch returned public page HTML with slide assets")
         return html
       }
-      log("warn", "Direct fetch returned an empty or incomplete page")
+      if (html.length > 1000) {
+        log("info", "Direct response contains no slide assets; switching to browser rendering...")
+      } else {
+        log("warn", "Direct fetch returned an empty or incomplete page")
+      }
     } else {
       log("warn", `Direct fetch returned HTTP ${resp.status}`)
     }
