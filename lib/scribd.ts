@@ -87,6 +87,22 @@ export async function downloadScribd(
     await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
     await new Promise((r) => setTimeout(r, 2500))
 
+    // Scribd currently returns a lightweight anti-automation client-challenge
+    // shell for this unauthenticated embed instead of any page elements. Detect
+    // that public response explicitly; never attempt to solve or bypass it.
+    const challengeState = await page.evaluate(() => ({
+      title: document.title,
+      html: document.documentElement?.outerHTML?.slice(0, 12000) ?? "",
+      text: document.body?.innerText?.slice(0, 2000) ?? "",
+    }))
+    if (/client challenge|_fs-ch-|please enable javascript to proceed/i.test(`${challengeState.title}\n${challengeState.html}\n${challengeState.text}`)) {
+      log("warn", "Scribd returned a client-challenge shell instead of public page assets")
+      return {
+        error:
+          "Scribd returned an unauthenticated client challenge instead of public page assets. This document cannot be extracted without bypassing Scribd's access controls; DocGrab does not bypass login, paywalls, CAPTCHA, or client challenges.",
+      }
+    }
+
     // Remove cookie/consent banners
     log("info", "Removing consent banners and overlays...")
     await page.evaluate(() => {
