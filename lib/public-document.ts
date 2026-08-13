@@ -1,8 +1,10 @@
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { storeForDownload } from "./delivery"
-import { getUserAgent } from "./user-agent"
+import { generateUserAgent, getUserAgent } from "./user-agent"
 import { fetchImpersonated, isChallengePage } from "./impersonate"
+import { extractRecaptcha, solveRecaptcha, recaptchaReplayHeaders } from "./recaptcha"
+import { acquireProxy, fetchViaProxy } from "./proxy"
 import type { DownloadOptions, Logger, OutputFormat, ProgressReporter } from "./types"
 
 const MAX_SOURCE_BYTES = 200 * 1024 * 1024
@@ -145,14 +147,19 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
 }
 
 /**
- * If a page responds with an anti-bot challenge shell instead of content
- * (Cloudflare/Fastly/Turnstile/hCaptcha etc.), retry it with a Chrome TLS
- * fingerprint (curl-impersonate). Interactive CAPTCHAs still cannot be
- * solved — that is reported back as reason "challenge".
+ * Fetch a page with an escalating fallback ladder:
+ *   1. plain fetch (per-download UA)
+ *   2. Chrome TLS fingerprint (curl-impersonate) for Cloudflare/Fastly walls
+ *   3. reCAPTCHA solve via service (CAPTCHA_API_KEY) + replay with the token
+ *   4. scrape public proxies and retry through the pool
+ * Interactive CAPTCHAs that no stage can overcome are reported back as
+ * reason "challenge".
  */
 type FallbackFetchResult =
   | { ok: true; body: Buffer; contentType: string; status: number }
   | { ok: false; reason: "network" | "challenge" | "oversize" }
+
+const MAX_PROXY_ATTEMPTS = 3
 
 async function fetchWithImpersonationFallback(
   url: string,
@@ -195,16 +202,72 @@ async function fetchWithImpersonationFallback(
 
   log("info", "Source rejected the plain fetch (anti-bot wall?) — retrying with a Chrome TLS fingerprint (curl-impersonate)...")
   const impersonated = await fetchImpersonated(url, log, timeoutMs)
-  if (!impersonated || impersonated.status === 0 || impersonated.status >= 400) {
+  if (impersonated && impersonated.status > 0 && impersonated.status < 400 && impersonated.buffer.length <= MAX_SOURCE_BYTES) {
+    if (!isChallengePage(impersonated.buffer.toString("utf8", 0, 60000))) {
+      return { ok: true, body: impersonated.buffer, contentType: impersonated.contentType, status: impersonated.status }
+    }
+  } else if (!impersonated) {
     log("warn", "curl-impersonate retry failed")
-    return { ok: false, reason: "network" }
   }
-  if (impersonated.buffer.length > MAX_SOURCE_BYTES) return { ok: false, reason: "oversize" }
-  if (isChallengePage(impersonated.buffer.toString("utf8", 0, 60000))) {
-    log("warn", "The challenge does not auto-resolve from this server's network; interactive CAPTCHAs are not solved by DocGrab")
-    return { ok: false, reason: "challenge" }
+
+  // reCAPTCHA-gated page: extract the widget and solve it via the service.
+  const challengedHtml = impersonated?.buffer.toString("utf8", 0, 60000) ?? text
+  const widget = extractRecaptcha(challengedHtml)
+  if (widget) {
+    log("info", `reCAPTCHA ${widget.version} widget detected (sitekey ${widget.sitekey.slice(0, 8)}…) — solving...`)
+    const token = await solveRecaptcha(widget, url, log)
+    if (token) {
+      const replay = recaptchaReplayHeaders(token)
+      try {
+        const retried = await fetch(url, {
+          headers: {
+            "User-Agent": generateUserAgent(),
+            Accept: "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
+            ...replay.headers,
+            cookie: replay.cookie,
+          },
+          redirect: "follow",
+          signal: AbortSignal.timeout(timeoutMs),
+        })
+        const body = Buffer.from(await retried.arrayBuffer())
+        if (retried.status < 400 && !isChallengePage(body.toString("utf8", 0, 60000))) {
+          log("success", "reCAPTCHA solved — retry returned real content")
+          return { ok: true, body, contentType: retried.headers.get("content-type") ?? "", status: retried.status }
+        }
+        log("warn", `replayed request still challenged (HTTP ${retried.status})`)
+      } catch (error) {
+        log("warn", `reCAPTCHA replay fetch failed: ${error instanceof Error ? error.message : "unknown error"}`)
+      }
+    }
   }
-  return { ok: true, body: impersonated.buffer, contentType: impersonated.contentType, status: impersonated.status }
+
+  // Last resort: scrape public proxies and retry through the pool.
+  log("info", "Trying public proxy pool as a last resort...")
+  for (let attempt = 0; attempt < MAX_PROXY_ATTEMPTS; attempt++) {
+    const proxy = await acquireProxy(log)
+    if (!proxy) {
+      log("warn", "No public proxies available")
+      break
+    }
+    const viaProxy = await fetchViaProxy(
+      url,
+      proxy,
+      { "User-Agent": generateUserAgent(), Accept: "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8" },
+      10_000,
+    )
+    if (viaProxy && viaProxy.status < 400 && viaProxy.body.length <= MAX_SOURCE_BYTES) {
+      if (!isChallengePage(viaProxy.body.toString("utf8", 0, 60000))) {
+        log("success", `Proxy ${proxy} delivered real content`)
+        return { ok: true, body: viaProxy.body, contentType: viaProxy.contentType, status: viaProxy.status }
+      }
+      log("warn", `Proxy ${proxy} returned another challenge shell`)
+    } else {
+      log("warn", `Proxy ${proxy} failed (${viaProxy ? `HTTP ${viaProxy.status}` : "timeout/refused"})`)
+    }
+  }
+
+  log("warn", "The challenge did not resolve via TLS fingerprint, CAPTCHA solve, or public proxies")
+  return { ok: false, reason: "challenge" }
 }
 
 function looksLikeDocument(buffer: Buffer, extension: PublicDocumentExtension): boolean {
@@ -273,7 +336,7 @@ export async function downloadPublicDocument(
           return {
             error:
               fetched.reason === "challenge"
-                ? "This site is protected by an anti-bot challenge (Cloudflare, reCAPTCHA, or similar). DocGrab does not solve CAPTCHAs, so this document cannot be downloaded automatically."
+                ? "This site is protected by an anti-bot challenge (Cloudflare, reCAPTCHA, or similar) that did not resolve via TLS fingerprint, CAPTCHA solving, or the public proxy pool. Configure CAPTCHA_API_KEY to enable reCAPTCHA solving."
                 : "The source page could not be fetched from this server's network.",
           }
         }

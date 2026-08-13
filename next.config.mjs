@@ -7,6 +7,12 @@ const chromiumFiles = [
 ]
 
 const nextConfig = {
+  // Pin the workspace root: otherwise Turbopack walks up from the repo and
+  // can pick up a stray lockfile in a parent directory, then resolve deps
+  // against the wrong node_modules (invalid-symlink panics).
+  turbopack: {
+    root: import.meta.dirname,
+  },
   typescript: {
     ignoreBuildErrors: false,
   },
