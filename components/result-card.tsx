@@ -11,6 +11,9 @@ export interface GrabResult {
   format: OutputFormat
   textSelectable?: boolean
   sourceUrl?: string
+  cachedUrl?: string
+  cachedExpiresAt?: number
+  cacheHit?: boolean
   catboxUrl?: string
   catboxExpiresAt?: number
   /** Local blob URL built from inline file bytes — works regardless of server instance. */
@@ -28,7 +31,7 @@ function safeFileName(title: string, format: OutputFormat): string {
 
 export function ResultCard({ result }: { result: GrabResult }) {
   const formatLabel = result.format.toUpperCase()
-  const downloadHref = result.blobUrl ?? result.catboxUrl ?? `/api/file/${result.id}`
+  const downloadHref = result.blobUrl ?? result.cachedUrl ?? result.catboxUrl ?? `/api/file/${result.id}`
 
   return (
     <section
@@ -71,6 +74,23 @@ export function ResultCard({ result }: { result: GrabResult }) {
         >
           <ExternalLink className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
           <span className="truncate">Source asset</span>
+        </a>
+      )}
+
+      {result.cachedUrl && !result.blobUrl && (
+        <a
+          href={result.cachedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors break-all"
+        >
+          <Cloud className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <span className="truncate">Cached on Vercel Blob</span>
+          {result.cachedExpiresAt && (
+            <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+              12h cache
+            </span>
+          )}
         </a>
       )}
 

@@ -4,6 +4,7 @@ import { downloadScribd } from "@/lib/scribd"
 import { assertPublicUrl, downloadPublicDocument } from "@/lib/public-document"
 import { checkRateLimit, getClientKey } from "@/lib/rate-limit"
 import { registerDownload } from "@/lib/user-agent"
+import { getCachedDocument } from "@/lib/blob-cache"
 import type { StreamEvent, Logger, ProgressReporter, DownloadOptions, OutputFormat, Platform } from "@/lib/types"
 
 export const runtime = "nodejs"
@@ -90,6 +91,30 @@ export async function POST(request: NextRequest) {
         log("info", `Platform detected: ${platform}`)
         log("info", `Target URL: ${url}`)
         registerDownload()
+
+        // A user-requested Catbox upload has its own semantics, so it remains a
+        // fresh generation. Ordinary requests can reuse the immutable 12-hour
+        // Blob result before touching SlideShare, Scribd, or the source page.
+        if (!options.uploadToCatbox) {
+          const cached = await getCachedDocument(url, format, log)
+          if (cached) {
+            send({
+              type: "result",
+              id: cached.id,
+              title: cached.title,
+              pages: cached.pages,
+              size: cached.size,
+              platform,
+              format: cached.format,
+              textSelectable: cached.textSelectable,
+              sourceUrl: cached.sourceUrl,
+              cachedUrl: cached.cachedUrl,
+              cachedExpiresAt: cached.cachedExpiresAt,
+              cacheHit: true,
+            })
+            return
+          }
+        }
 
         const outcome =
           platform === "slideshare"

@@ -36,12 +36,18 @@ export interface ResultEvent {
   textSelectable?: boolean
   /** Present for public sources so the user can audit the selected asset. */
   sourceUrl?: string
+  /** Public Vercel Blob URL for the 12-hour generated-file cache. */
+  cachedUrl?: string
+  /** Expiry timestamp for the generated-file cache entry. */
+  cachedExpiresAt?: number
+  /** True when this result was returned without rebuilding the source document. */
+  cacheHit?: boolean
   catboxUrl?: string
   /** Set when the file was stored on litterbox (anonymous tier) and will expire. */
   catboxExpiresAt?: number
   /**
    * Optional inline bytes. Small files use this for instant client-side download;
-   * larger files include catboxUrl so the browser does not depend on instance-local /tmp.
+   * larger files include cachedUrl or catboxUrl so the browser does not depend on instance-local /tmp.
    */
   fileBase64?: string
 }

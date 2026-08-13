@@ -24,6 +24,8 @@ export interface PublicDocumentResult {
   platform: "public"
   textSelectable: boolean
   sourceUrl: string
+  cachedUrl?: string
+  cachedExpiresAt?: number
   catboxUrl?: string
   catboxExpiresAt?: number
   fileBase64?: string
@@ -283,20 +285,31 @@ export async function downloadPublicDocument(
 
   progress(1, 1, "Public document ready")
   const size = `${(fetched.buffer.length / 1024 / 1024).toFixed(1)} MB`
+  const pages = countPages(fetched.buffer, fetched.extension)
   log("success", `Original ${format.toUpperCase()} preserved: ${size}`)
-  const delivery = await storeForDownload(fetched.buffer, title, format, options, log)
+  const delivery = await storeForDownload(fetched.buffer, title, format, options, log, {
+    sourceUrl: url,
+    title,
+    pages,
+    size,
+    format,
+    platform: "public",
+    textSelectable: true,
+  })
   if ("error" in delivery) return delivery
 
   return {
     result: {
       id: delivery.id,
       title,
-      pages: countPages(fetched.buffer, fetched.extension),
+      pages,
       size,
       format,
       platform: "public",
       textSelectable: true,
       sourceUrl,
+      cachedUrl: delivery.cachedUrl,
+      cachedExpiresAt: delivery.cachedExpiresAt,
       catboxUrl: delivery.catboxUrl,
       catboxExpiresAt: delivery.catboxExpiresAt,
       fileBase64: delivery.fileBase64,

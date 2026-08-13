@@ -7,7 +7,9 @@ import { webpToJpeg } from "./webp"
 import { downloadPublicDocument } from "./public-document"
 import type { Logger, ProgressReporter, DownloadOptions, OutputFormat } from "./types"
 
-const IMAGE_CONCURRENCY = 8
+// SlideShare's public CDN handles a bounded 16-way fan-out faster than the
+// previous 8-way limit while remaining below an unbounded request storm.
+const IMAGE_CONCURRENCY = 16
 const IMAGE_RETRIES = 2
 const IMAGE_TIMEOUT_MS = 8000
 const IMAGE_PROBE_TIMEOUT_MS = 9000
@@ -18,6 +20,8 @@ interface SlideshareResult {
   pages: number
   size: string
   format: OutputFormat
+  cachedUrl?: string
+  cachedExpiresAt?: number
   catboxUrl?: string
   catboxExpiresAt?: number
   fileBase64?: string
@@ -443,7 +447,15 @@ export async function downloadSlideshare(
   const sizeMb = `${(fileBuffer.length / 1024 / 1024).toFixed(1)} MB`
   log("success", `${options.format.toUpperCase()} built: ${sizeMb}, ${jpegs.length} pages`)
 
-  const delivery = await storeForDownload(fileBuffer, title, options.format, options, log)
+  const delivery = await storeForDownload(fileBuffer, title, options.format, options, log, {
+    sourceUrl: url,
+    title,
+    pages: jpegs.length,
+    size: sizeMb,
+    format: options.format,
+    platform: "slideshare",
+    textSelectable: false,
+  })
   if ("error" in delivery) return delivery
   log("success", `${options.format.toUpperCase()} stored and ready for download`)
 
@@ -454,6 +466,8 @@ export async function downloadSlideshare(
       pages: jpegs.length,
       size: sizeMb,
       format: options.format,
+      cachedUrl: delivery.cachedUrl,
+      cachedExpiresAt: delivery.cachedExpiresAt,
       catboxUrl: delivery.catboxUrl,
       catboxExpiresAt: delivery.catboxExpiresAt,
       textSelectable: false,

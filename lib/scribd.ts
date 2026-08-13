@@ -10,6 +10,8 @@ interface ScribdResult {
   pages: number
   size: string
   format: OutputFormat
+  cachedUrl?: string
+  cachedExpiresAt?: number
   catboxUrl?: string
   catboxExpiresAt?: number
   fileBase64?: string
@@ -49,6 +51,8 @@ export async function downloadScribd(
         pages: original.result.pages,
         size: original.result.size,
         format: original.result.format,
+        cachedUrl: original.result.cachedUrl,
+        cachedExpiresAt: original.result.cachedExpiresAt,
         catboxUrl: original.result.catboxUrl,
         catboxExpiresAt: original.result.catboxExpiresAt,
         fileBase64: original.result.fileBase64,
@@ -274,7 +278,15 @@ export async function downloadScribd(
     const sizeMb = `${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`
     log("success", `PDF exported: ${sizeMb}`)
 
-    const delivery = await storeForDownload(pdfBuffer, title, "pdf", options, log)
+    const delivery = await storeForDownload(pdfBuffer, title, "pdf", options, log, {
+      sourceUrl: url,
+      title,
+      pages: pageCount,
+      size: sizeMb,
+      format: "pdf",
+      platform: "scribd",
+      textSelectable,
+    })
     if ("error" in delivery) return delivery
     log("success", "PDF stored and ready for download")
 
@@ -285,6 +297,8 @@ export async function downloadScribd(
         pages: pageCount,
         size: sizeMb,
         format: "pdf",
+        cachedUrl: delivery.cachedUrl,
+        cachedExpiresAt: delivery.cachedExpiresAt,
         catboxUrl: delivery.catboxUrl,
         catboxExpiresAt: delivery.catboxExpiresAt,
         textSelectable,
