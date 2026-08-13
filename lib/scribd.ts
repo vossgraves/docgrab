@@ -144,21 +144,6 @@ export async function downloadScribd(
     await page.setUserAgent(getUserAgent())
     page.setDefaultTimeout(60000)
 
-    // Prime the session: the embed only renders for visitors who first hit a
-    // Scribd page, because the challenge cookie lands there. Loading the embed
-    // cold (the old behavior) yielded a sessionless embed that rendered zero
-    // pages and produced the "No pages found" error.
-    log("info", "Visiting the document page to pass Scribd's client challenge...")
-    const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 25000)
-    if (!primed) {
-      return {
-        error:
-          "Scribd's anti-bot challenge did not auto-resolve from this server's network. DocGrab does not attempt to solve CAPTCHAs or bypass login or paywalls, so this document cannot be downloaded right now. Try again later.",
-      }
-    }
-    log("success", "Client challenge passed, session primed")
-
-    log("info", `Loading embed page: ${embedUrl}`)
     // Serve every JSONP page payload from Node so rendering no longer depends
     // on the in-page token machinery (see fetchPageJsonp above).
     await page.setRequestInterception(true)
@@ -171,8 +156,27 @@ export async function downloadScribd(
       }
       request.continue().catch(() => {})
     })
+
+    // Load the embed directly: the page definitions and their JSONP payloads
+    // live on Scribd's public CDN and need no session cookie. Only when Fastly
+    // answers with a client-challenge shell does the session need priming via
+    // the document page (the challenge cookie lands there), then reload.
+    log("info", `Loading embed page: ${embedUrl}`)
     await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
     await waitMillis(2500)
+    if (await isChallengeShell(page)) {
+      log("info", "Embed is behind a client challenge; priming session via the document page...")
+      const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 25000)
+      if (!primed) {
+        return {
+          error:
+            "Scribd's anti-bot challenge did not auto-resolve from this server's network. DocGrab does not attempt to solve CAPTCHAs or bypass login or paywalls, so this document cannot be downloaded right now. Try again later.",
+        }
+      }
+      log("success", "Client challenge passed, session primed")
+      await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
+      await waitMillis(2500)
+    }
 
     // Scribd's embed shows an explicit "unavailable" panel for documents the
     // owner deleted or restricted. Report that accurately instead of the
