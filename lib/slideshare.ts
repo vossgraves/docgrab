@@ -7,9 +7,10 @@ import { webpToJpeg } from "./webp"
 import { downloadPublicDocument } from "./public-document"
 import type { Logger, ProgressReporter, DownloadOptions, OutputFormat } from "./types"
 
-// SlideShare's public CDN handles a bounded 16-way fan-out faster than the
-// previous 8-way limit while remaining below an unbounded request storm.
-const IMAGE_CONCURRENCY = 16
+// SlideShare's WebP-to-JPEG WASM conversion is CPU-bound on Vercel's
+// two-core functions. Four workers were the fastest stable setting: all 53
+// slides succeeded locally, while 8/16 workers produced timeout failures.
+const IMAGE_CONCURRENCY = 4
 const IMAGE_RETRIES = 2
 const IMAGE_TIMEOUT_MS = 8000
 const IMAGE_PROBE_TIMEOUT_MS = 9000
