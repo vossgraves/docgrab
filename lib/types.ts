@@ -41,7 +41,7 @@ export interface ResultEvent {
   catboxExpiresAt?: number
   /**
    * Optional inline bytes. Small files use this for instant client-side download;
-   * larger files use the server-side file route to avoid Vercel payload limits.
+   * larger files include catboxUrl so the browser does not depend on instance-local /tmp.
    */
   fileBase64?: string
 }

@@ -1,9 +1,7 @@
 import { buildPdfFromJpegs, isJpeg } from "./pdf"
 import { buildPptxFromJpegs } from "./pptx"
-import { saveFile } from "./store"
-import { uploadToCatbox } from "./catbox"
+import { storeForDownload } from "./delivery"
 import { fetchHtmlWithBrowser } from "./browser"
-import { slugify } from "./store"
 import { getUserAgent } from "./user-agent"
 import { webpToJpeg } from "./webp"
 import { downloadPublicDocument } from "./public-document"
@@ -445,32 +443,21 @@ export async function downloadSlideshare(
   const sizeMb = `${(fileBuffer.length / 1024 / 1024).toFixed(1)} MB`
   log("success", `${options.format.toUpperCase()} built: ${sizeMb}, ${jpegs.length} pages`)
 
-  const id = await saveFile(fileBuffer, title, options.format)
+  const delivery = await storeForDownload(fileBuffer, title, options.format, options, log)
+  if ("error" in delivery) return delivery
   log("success", `${options.format.toUpperCase()} stored and ready for download`)
-
-  let catboxUrl: string | undefined
-  let catboxExpiresAt: number | undefined
-  if (options.uploadToCatbox) {
-    const contentType =
-      options.format === "pptx"
-        ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        : "application/pdf"
-    const uploaded = await uploadToCatbox(fileBuffer, `${slugify(title)}.${options.format}`, contentType, log, options.catboxUserhash)
-    catboxUrl = uploaded.url
-    catboxExpiresAt = uploaded.expiresAt
-  }
 
   return {
     result: {
-      id,
+      id: delivery.id,
       title,
       pages: jpegs.length,
       size: sizeMb,
       format: options.format,
-      catboxUrl,
-      catboxExpiresAt,
+      catboxUrl: delivery.catboxUrl,
+      catboxExpiresAt: delivery.catboxExpiresAt,
       textSelectable: false,
-      fileBase64: fileBuffer.length <= 3_000_000 ? fileBuffer.toString("base64") : undefined,
+      fileBase64: delivery.fileBase64,
     },
   }
 }

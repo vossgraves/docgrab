@@ -28,7 +28,7 @@ function safeFileName(title: string, format: OutputFormat): string {
 
 export function ResultCard({ result }: { result: GrabResult }) {
   const formatLabel = result.format.toUpperCase()
-  const downloadHref = result.blobUrl ?? `/api/file/${result.id}`
+  const downloadHref = result.blobUrl ?? result.catboxUrl ?? `/api/file/${result.id}`
 
   return (
     <section

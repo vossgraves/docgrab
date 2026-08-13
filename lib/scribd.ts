@@ -1,6 +1,5 @@
-import { saveFile, slugify } from "./store"
 import { launchBrowser } from "./browser"
-import { uploadToCatbox } from "./catbox"
+import { storeForDownload } from "./delivery"
 import { getUserAgent } from "./user-agent"
 import { downloadPublicDocument } from "./public-document"
 import type { Logger, ProgressReporter, DownloadOptions, OutputFormat } from "./types"
@@ -275,28 +274,21 @@ export async function downloadScribd(
     const sizeMb = `${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`
     log("success", `PDF exported: ${sizeMb}`)
 
-    const id = await saveFile(pdfBuffer, title, "pdf")
+    const delivery = await storeForDownload(pdfBuffer, title, "pdf", options, log)
+    if ("error" in delivery) return delivery
     log("success", "PDF stored and ready for download")
-
-    let catboxUrl: string | undefined
-    let catboxExpiresAt: number | undefined
-    if (options.uploadToCatbox) {
-      const uploaded = await uploadToCatbox(pdfBuffer, `${slugify(title)}.pdf`, "application/pdf", log, options.catboxUserhash)
-      catboxUrl = uploaded.url
-      catboxExpiresAt = uploaded.expiresAt
-    }
 
     return {
       result: {
-        id,
+        id: delivery.id,
         title,
         pages: pageCount,
         size: sizeMb,
         format: "pdf",
-        catboxUrl,
-        catboxExpiresAt,
+        catboxUrl: delivery.catboxUrl,
+        catboxExpiresAt: delivery.catboxExpiresAt,
         textSelectable,
-        fileBase64: pdfBuffer.length <= 3_000_000 ? pdfBuffer.toString("base64") : undefined,
+        fileBase64: delivery.fileBase64,
       },
     }
   } catch (e) {

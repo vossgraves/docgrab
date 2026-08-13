@@ -1,7 +1,6 @@
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { saveFile, slugify } from "./store"
-import { uploadToCatbox } from "./catbox"
+import { storeForDownload } from "./delivery"
 import { getUserAgent } from "./user-agent"
 import type { DownloadOptions, Logger, OutputFormat, ProgressReporter } from "./types"
 
@@ -283,22 +282,14 @@ export async function downloadPublicDocument(
   }
 
   progress(1, 1, "Public document ready")
-  const id = await saveFile(fetched.buffer, title, format)
   const size = `${(fetched.buffer.length / 1024 / 1024).toFixed(1)} MB`
   log("success", `Original ${format.toUpperCase()} preserved: ${size}`)
-
-  let catboxUrl: string | undefined
-  let catboxExpiresAt: number | undefined
-  if (options.uploadToCatbox) {
-    const contentType = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    const uploaded = await uploadToCatbox(fetched.buffer, `${slugify(title)}.${format}`, contentType, log, options.catboxUserhash)
-    catboxUrl = uploaded.url
-    catboxExpiresAt = uploaded.expiresAt
-  }
+  const delivery = await storeForDownload(fetched.buffer, title, format, options, log)
+  if ("error" in delivery) return delivery
 
   return {
     result: {
-      id,
+      id: delivery.id,
       title,
       pages: countPages(fetched.buffer, fetched.extension),
       size,
@@ -306,10 +297,9 @@ export async function downloadPublicDocument(
       platform: "public",
       textSelectable: true,
       sourceUrl,
-      catboxUrl,
-      catboxExpiresAt,
-      // Keep the response below Vercel's small-function payload ceilings.
-      fileBase64: fetched.buffer.length <= 3_000_000 ? fetched.buffer.toString("base64") : undefined,
+      catboxUrl: delivery.catboxUrl,
+      catboxExpiresAt: delivery.catboxExpiresAt,
+      fileBase64: delivery.fileBase64,
     },
   }
 }
