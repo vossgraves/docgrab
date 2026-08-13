@@ -66,7 +66,12 @@ async function fetchPageHtml(url: string, log: Logger): Promise<string | null> {
   }
 
   log("step", "Falling back to normal headless browser rendering...")
-  const browserHtml = await fetchHtmlWithBrowser(url, log)
+  const browserHtml = await fetchHtmlWithBrowser(
+    url,
+    log,
+    60000,
+    'img[src*="slidesharecdn.com"], img[data-src*="slidesharecdn.com"], source[srcset*="slidesharecdn.com"], [data-slide-image*="slidesharecdn.com"]',
+  )
   if (browserHtml && browserHtml.length > 1000) {
     log("success", "Headless browser retrieved public page HTML")
     return browserHtml

@@ -88,7 +88,12 @@ export async function launchBrowser(log: Logger) {
  * Fetch a page's fully rendered HTML using normal headless Chrome for
  * public client-rendered pages.
  */
-export async function fetchHtmlWithBrowser(url: string, log: Logger, timeoutMs = 60000): Promise<string | null> {
+export async function fetchHtmlWithBrowser(
+  url: string,
+  log: Logger,
+  timeoutMs = 60000,
+  readySelector?: string,
+): Promise<string | null> {
   let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null
   try {
     browser = await launchBrowser(log)
@@ -100,6 +105,13 @@ export async function fetchHtmlWithBrowser(url: string, log: Logger, timeoutMs =
       await page.waitForFunction(() => Boolean(document.body?.innerHTML.length), { timeout: 10000 })
     } catch {
       log("warn", "Public page did not finish rendering before the timeout")
+    }
+    if (readySelector) {
+      try {
+        await page.waitForSelector(readySelector, { timeout: Math.min(timeoutMs, 20000) })
+      } catch {
+        log("warn", `Public page did not expose the expected asset marker: ${readySelector}`)
+      }
     }
     return await page.content()
   } catch (e) {
