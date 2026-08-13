@@ -2,6 +2,7 @@ import { launchBrowser } from "./browser"
 import { storeForDownload } from "./delivery"
 import { getUserAgent } from "./user-agent"
 import { downloadPublicDocument } from "./public-document"
+import type { Page } from "puppeteer-core"
 import type { Logger, ProgressReporter, DownloadOptions, OutputFormat } from "./types"
 
 interface ScribdResult {
@@ -75,6 +76,35 @@ export async function downloadScribd(
   }
   log("info", `Resolved title: ${title}`)
 
+  const waitMillis = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  // Fastly serves a JS client challenge shell (/_fs-ch-*) to datacenter
+  // traffic. In a real browser the challenge solves itself and drops a cookie
+  // into the session. Detect that shell so we can wait for it instead of
+  // mistaking it for a document with no pages.
+  const isChallengeShell = async (page: Page) =>
+    page.evaluate(() => {
+      const haystack = `${document.title}\n${document.documentElement?.outerHTML?.slice(0, 20000) ?? ""}\n${document.body?.innerText?.slice(0, 2000) ?? ""}`
+      return /client challenge|_fs-ch-|please enable javascript to proceed/i.test(haystack)
+    })
+
+  // Visit a page and wait for the Fastly client challenge to auto-resolve in
+  // this browser (a normal visitor never sees it). Returns true when the real
+  // page content replaced the challenge shell.
+  const passClientChallenge = async (
+    page: Page,
+    visitUrl: string,
+    timeoutMs: number,
+  ) => {
+    await page.goto(visitUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (!(await isChallengeShell(page))) return true
+      await waitMillis(1000)
+    }
+    return false
+  }
+
   let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null
   try {
     log("step", "Launching headless browser...")
@@ -83,25 +113,23 @@ export async function downloadScribd(
     await page.setUserAgent(getUserAgent())
     page.setDefaultTimeout(60000)
 
-    log("info", `Loading embed page: ${embedUrl}`)
-    await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
-    await new Promise((r) => setTimeout(r, 2500))
-
-    // Scribd currently returns a lightweight anti-automation client-challenge
-    // shell for this unauthenticated embed instead of any page elements. Detect
-    // that public response explicitly; never attempt to solve or bypass it.
-    const challengeState = await page.evaluate(() => ({
-      title: document.title,
-      html: document.documentElement?.outerHTML?.slice(0, 12000) ?? "",
-      text: document.body?.innerText?.slice(0, 2000) ?? "",
-    }))
-    if (/client challenge|_fs-ch-|please enable javascript to proceed/i.test(`${challengeState.title}\n${challengeState.html}\n${challengeState.text}`)) {
-      log("warn", "Scribd returned a client-challenge shell instead of public page assets")
+    // Prime the session: the embed only renders for visitors who first hit a
+    // Scribd page, because the challenge cookie lands there. Loading the embed
+    // cold (the old behavior) yielded a sessionless embed that rendered zero
+    // pages and produced the "No pages found" error.
+    log("info", "Visiting the document page to pass Scribd's client challenge...")
+    const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 25000)
+    if (!primed) {
       return {
         error:
-          "Scribd returned an unauthenticated client challenge instead of public page assets. This document cannot be extracted without bypassing Scribd's access controls; DocGrab does not bypass login, paywalls, CAPTCHA, or client challenges.",
+          "Scribd's anti-bot challenge did not auto-resolve from this server's network. DocGrab does not attempt to solve CAPTCHAs or bypass login or paywalls, so this document cannot be downloaded right now. Try again later.",
       }
     }
+    log("success", "Client challenge passed, session primed")
+
+    log("info", `Loading embed page: ${embedUrl}`)
+    await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
+    await waitMillis(2500)
 
     // Remove cookie/consent banners
     log("info", "Removing consent banners and overlays...")
@@ -129,6 +157,7 @@ export async function downloadScribd(
     let lastTotal = -1
     let pageCount = 0
     let emptyChecks = 0
+    let embedReloads = 0
     const maxIterations = 240
 
     const pageCountInDom = async () =>
@@ -153,7 +182,23 @@ export async function downloadScribd(
       const total = await pageCountInDom()
       if (total === 0) {
         emptyChecks++
-        if (emptyChecks >= 12) return { error: "No pages found. The document may be restricted, removed, or unavailable to this visitor." }
+        if (emptyChecks >= 12) {
+          // The embed occasionally still lands on the challenge shell even
+          // after priming. A reload then serves it with the session cookie.
+          if (embedReloads < 2 && (await isChallengeShell(page))) {
+            embedReloads++
+            emptyChecks = 0
+            log("warn", `Embed still behind the client challenge, reloading (attempt ${embedReloads})...`)
+            await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
+            await waitMillis(3000)
+            continue
+          }
+          return {
+            error: (await isChallengeShell(page))
+              ? "Scribd's anti-bot challenge blocked the embed from this server's network. Try again later."
+              : "No pages found. The document may be restricted, removed, or unavailable to this visitor.",
+          }
+        }
         await new Promise((r) => setTimeout(r, 500))
         continue
       }
@@ -188,7 +233,13 @@ export async function downloadScribd(
       pageCount = total
       await new Promise((r) => setTimeout(r, 450))
     }
-    if (pageCount === 0) return { error: "No pages found. The document may be restricted, removed, or unavailable to this visitor." }
+    if (pageCount === 0) {
+      return {
+        error: (await isChallengeShell(page))
+          ? "Scribd's anti-bot challenge blocked the embed from this server's network. Try again later."
+          : "No pages found. The document may be restricted, removed, or unavailable to this visitor.",
+      }
+    }
     log("success", `All ${pageCount} pages loaded`)
 
     // Strip toolbars and inject print CSS
