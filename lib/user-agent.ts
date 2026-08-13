@@ -1,10 +1,10 @@
 /**
- * Built-in User-Agent generator with automatic rotation.
+ * Built-in User-Agent generator.
  *
  * A single hardcoded UA is an easy flag target for CDNs: the same string
  * hitting the same endpoints thousands of times looks like a bot. This module
- * generates realistic, current desktop UAs and rotates the active one every
- * ROTATE_EVERY downloads, so traffic blends in with normal browser churn.
+ * generates a fresh, realistic desktop Chrome UA per download so every
+ * request looks like an ordinary new visitor.
  *
  * Notes:
  * - Modern Chrome reports a reduced UA (`Chrome/126.0.0.0`) — only the major
@@ -12,8 +12,6 @@
  * - On serverless hosting each function instance keeps its own counter, which
  *   is fine: more instances simply means more natural UA diversity.
  */
-
-const ROTATE_EVERY = 50
 
 /** Current desktop Chrome major versions (stable +/- a couple of releases). */
 const CHROME_MAJORS = [124, 125, 126, 127, 128]
@@ -36,22 +34,17 @@ export function generateUserAgent(): string {
   return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
 }
 
-let downloadsSinceRotation = 0
 let activeUA = generateUserAgent()
 
 /**
- * Register one download job. Rotates the active UA after every
- * ROTATE_EVERY downloads. Call once per download request.
+ * Register one download job and rotate to a brand new UA immediately, so
+ * every download looks like a first-time visitor.
  */
 export function registerDownload(): void {
-  downloadsSinceRotation++
-  if (downloadsSinceRotation >= ROTATE_EVERY) {
-    downloadsSinceRotation = 0
-    activeUA = generateUserAgent()
-  }
+  activeUA = generateUserAgent()
 }
 
-/** The currently active User-Agent. Stable within a rotation window. */
+/** The currently active User-Agent. Fresh for every registered download. */
 export function getUserAgent(): string {
   return activeUA
 }

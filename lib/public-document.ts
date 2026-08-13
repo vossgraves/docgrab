@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { storeForDownload } from "./delivery"
 import { getUserAgent } from "./user-agent"
+import { fetchImpersonated, isChallengePage } from "./impersonate"
 import type { DownloadOptions, Logger, OutputFormat, ProgressReporter } from "./types"
 
 const MAX_SOURCE_BYTES = 200 * 1024 * 1024
@@ -143,45 +144,67 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
   }
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = SOURCE_TIMEOUT_MS): Promise<Response> {
+/**
+ * If a page responds with an anti-bot challenge shell instead of content
+ * (Cloudflare/Fastly/Turnstile/hCaptcha etc.), retry it with a Chrome TLS
+ * fingerprint (curl-impersonate). Interactive CAPTCHAs still cannot be
+ * solved — that is reported back as reason "challenge".
+ */
+type FallbackFetchResult =
+  | { ok: true; body: Buffer; contentType: string; status: number }
+  | { ok: false; reason: "network" | "challenge" | "oversize" }
+
+async function fetchWithImpersonationFallback(
+  url: string,
+  log: Logger,
+  timeoutMs = SOURCE_TIMEOUT_MS,
+): Promise<FallbackFetchResult> {
   await assertPublicUrl(url)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
   try {
-    return await fetch(url, {
-      ...init,
-      signal: controller.signal,
+    response = await fetch(url, {
       headers: {
         "User-Agent": getUserAgent(),
-        Accept: "application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint,*/*;q=0.8",
-        ...(init.headers ?? {}),
+        Accept: "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
       },
+      signal: controller.signal,
+      redirect: "follow",
     })
-  } finally {
+  } catch {
     clearTimeout(timer)
+    return { ok: false, reason: "network" }
   }
-}
+  clearTimeout(timer)
 
-async function readResponseBuffer(response: Response): Promise<Buffer> {
-  const advertised = Number(response.headers.get("content-length") ?? "0")
-  if (advertised > MAX_SOURCE_BYTES) throw new Error("The public document is larger than the 200 MB server limit.")
-  if (!response.body) return Buffer.from(await response.arrayBuffer())
-
-  const reader = response.body.getReader()
-  const chunks: Buffer[] = []
-  let total = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    total += value.byteLength
-    if (total > MAX_SOURCE_BYTES) {
-      await reader.cancel()
-      throw new Error("The public document is larger than the 200 MB server limit.")
-    }
-    chunks.push(Buffer.from(value))
+  const contentLength = Number(response.headers.get("content-length") ?? "0")
+  if (contentLength > MAX_SOURCE_BYTES) return { ok: false, reason: "oversize" }
+  const text = await response.text()
+  // A 403 with no content is the classic bot-wall signature (e.g. plain
+  // Node fetch gets 403 from some CDNs where a Chrome fingerprint gets 200).
+  const challenged =
+    response.headers.get("cf-mitigated") === "challenge" ||
+    response.status === 403 ||
+    isChallengePage(text)
+  if (!challenged) {
+    const body = Buffer.from(text, "utf8")
+    if (body.length > MAX_SOURCE_BYTES) return { ok: false, reason: "oversize" }
+    return { ok: true, body, contentType: response.headers.get("content-type") ?? "", status: response.status }
   }
-  return Buffer.concat(chunks, total)
+
+  log("info", "Source rejected the plain fetch (anti-bot wall?) — retrying with a Chrome TLS fingerprint (curl-impersonate)...")
+  const impersonated = await fetchImpersonated(url, log, timeoutMs)
+  if (!impersonated || impersonated.status === 0 || impersonated.status >= 400) {
+    log("warn", "curl-impersonate retry failed")
+    return { ok: false, reason: "network" }
+  }
+  if (impersonated.buffer.length > MAX_SOURCE_BYTES) return { ok: false, reason: "oversize" }
+  if (isChallengePage(impersonated.buffer.toString("utf8", 0, 60000))) {
+    log("warn", "The challenge does not auto-resolve from this server's network; interactive CAPTCHAs are not solved by DocGrab")
+    return { ok: false, reason: "challenge" }
+  }
+  return { ok: true, body: impersonated.buffer, contentType: impersonated.contentType, status: impersonated.status }
 }
 
 function looksLikeDocument(buffer: Buffer, extension: PublicDocumentExtension): boolean {
@@ -210,13 +233,13 @@ export async function fetchPublicDocument(
   log: Logger,
 ): Promise<{ buffer: Buffer; extension: PublicDocumentExtension } | null> {
   try {
-    const response = await fetchWithTimeout(candidate.url)
-    if (!response.ok) {
-      log("warn", `Public document candidate returned HTTP ${response.status}`)
+    const fetched = await fetchWithImpersonationFallback(candidate.url, log)
+    if (!fetched.ok || (fetched.status !== 0 && fetched.status >= 400)) {
+      log("warn", `Public document candidate failed: ${fetched.ok ? `HTTP ${fetched.status}` : fetched.reason}`)
       return null
     }
-    const extension = extensionFromUrl(candidate.url, response.headers.get("content-type") ?? "") ?? candidate.extension
-    const buffer = await readResponseBuffer(response)
+    const extension = extensionFromUrl(candidate.url, fetched.contentType) ?? candidate.extension
+    const buffer = fetched.body
     if (!looksLikeDocument(buffer, extension)) {
       log("warn", "Candidate did not return a recognizable PDF or PowerPoint file")
       return null
@@ -245,9 +268,16 @@ export async function downloadPublicDocument(
       log("step", "Inspecting page markup for public document assets...")
       let html = pageHtml
       if (!html) {
-        const response = await fetchWithTimeout(url, { headers: { Accept: "text/html,application/xhtml+xml" } })
-        if (!response.ok) return { error: `Source page returned HTTP ${response.status}.` }
-        html = await response.text()
+        const fetched = await fetchWithImpersonationFallback(url, log)
+        if (!fetched.ok) {
+          return {
+            error:
+              fetched.reason === "challenge"
+                ? "This site is protected by an anti-bot challenge (Cloudflare, reCAPTCHA, or similar). DocGrab does not solve CAPTCHAs, so this document cannot be downloaded automatically."
+                : "The source page could not be fetched from this server's network.",
+          }
+        }
+        html = fetched.body.toString("utf8")
       }
       title = extractPageTitle(html, new URL(url).hostname)
       candidates = extractPublicDocumentCandidates(html, url)

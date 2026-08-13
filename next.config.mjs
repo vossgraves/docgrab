@@ -17,6 +17,7 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/*': [
       ...chromiumFiles,
+      './vendor/curl-impersonate-chrome',
       './node_modules/@jsquash/webp/**',
       './node_modules/@jsquash/jpeg/**',
       './node_modules/.pnpm/@jsquash+webp@*/node_modules/@jsquash/webp/**',
