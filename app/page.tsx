@@ -1,62 +1,77 @@
 import { Downloader } from "@/components/downloader"
 import { History } from "@/components/history"
+import { SITE_URL } from "@/lib/site"
 
 const GITHUB_URL = process.env.NEXT_PUBLIC_GITHUB_URL || "https://github.com/vossgraves/docgrab"
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://docgrab.vercel.app"
+
+const faqs = [
+  {
+    question: "How do I download a SlideShare presentation as a PDF?",
+    answer:
+      "Copy the public SlideShare presentation URL, paste it into DocGrab, and start the job. DocGrab retrieves the highest-quality public slide assets it can find and creates a clean PDF. If the original public PDF or PPTX is exposed, it keeps that source file instead of rasterizing it.",
+  },
+  {
+    question: "Can I download a public Scribd document?",
+    answer:
+      "Paste a public Scribd document URL into DocGrab. When the document’s public embed assets are available, DocGrab exports the accessible pages into a PDF. Text remains selectable when the source exposes a text layer; image-only pages cannot be converted into real text without inventing content.",
+  },
+  {
+    question: "Can DocGrab find documents embedded in other public pages?",
+    answer:
+      "Yes. DocGrab can inspect a public document page for ordinary embedded PDF, PPTX, and presentation assets without clicking the page’s download controls. Results depend on the asset being publicly reachable and on the page exposing a usable file or embed reference.",
+  },
+  {
+    question: "Is DocGrab free to use?",
+    answer:
+      "DocGrab is free to use and does not require an account. Use it only with documents you are allowed to access, copy, or download, and respect the source site’s terms and copyright restrictions.",
+  },
+]
 
 const jsonLd = {
   "@context": "https://schema.org",
   "@graph": [
     {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      name: "DocGrab",
+      alternateName: "docgrab.vossgraves.cyou",
+      url: SITE_URL,
+    },
+    {
       "@type": "WebApplication",
+      "@id": `${SITE_URL}/#application`,
       name: "DocGrab",
       url: SITE_URL,
       applicationCategory: "UtilitiesApplication",
       operatingSystem: "Any",
-      browserRequirements: "Requires JavaScript. Requires a modern web browser.",
+      browserRequirements: "Requires JavaScript and a modern web browser.",
       description:
-        "Download public SlideShare, Scribd, and embedded PDF or PowerPoint documents as clean files, preserving source text when the public asset provides it.",
+        "Download public SlideShare presentations, Scribd documents, and embedded PDF or PPTX files while preserving source text when it is available.",
       offers: {
         "@type": "Offer",
         price: "0",
         priceCurrency: "USD",
       },
       featureList: [
-        "Download SlideShare presentations as PDF or PPTX",
-        "Download public Scribd documents as PDF",
-        "Preserve public original PDF or PPTX files when exposed",
+        "Download public SlideShare presentations as PDF or PPTX when available",
+        "Export accessible public Scribd documents as PDF",
+        "Discover public PDF and PPTX assets embedded in document pages",
+        "Preserve original public files and their text layers when exposed",
         "Live process log",
         "No account required",
       ],
     },
     {
       "@type": "FAQPage",
-      mainEntity: [
-        {
-          "@type": "Question",
-          name: "How do I download a SlideShare presentation as a PDF?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Copy the SlideShare presentation URL, paste it into DocGrab, and click download. DocGrab fetches every slide at the highest available quality and rebuilds it into a clean PDF you can save instantly.",
-          },
+      "@id": `${SITE_URL}/#faq`,
+      mainEntity: faqs.map(({ question, answer }) => ({
+        "@type": "Question",
+        name: question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: answer,
         },
-        {
-          "@type": "Question",
-          name: "Can I download public Scribd documents?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Paste a public Scribd document link into DocGrab. When the public embed is available, DocGrab exports the rendered document as a PDF and preserves selectable text when that text is exposed by the source.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "Is DocGrab free to use?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "DocGrab is completely free. There is no account, no subscription, and no watermark on your downloaded files.",
-          },
-        },
-      ],
+      })),
     },
   ],
 }
@@ -73,7 +88,7 @@ export default function Home() {
   return (
     <main className="relative z-10 min-h-dvh flex flex-col">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <div className="mx-auto w-full max-w-2xl px-4 py-16 sm:py-24 flex-1 flex flex-col gap-8">
+      <div className="mx-auto w-full max-w-3xl px-4 py-16 sm:py-24 flex-1 flex flex-col gap-8">
         <header className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <span aria-hidden="true" className="size-2 rounded-full bg-primary" />
@@ -91,10 +106,8 @@ export default function Home() {
           <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground text-balance">
             Download public documents as PDF or PPTX.
           </h1>
-          <p className="text-sm text-muted-foreground leading-relaxed max-w-md text-pretty">
-            {
-              "Paste a SlideShare, Scribd, or public document-page link. DocGrab follows ordinary public assets without clicking download controls, preserves original PDF/PPTX files when available, and streams the process live."
-            }
+          <p className="text-sm text-muted-foreground leading-relaxed max-w-xl text-pretty">
+            Paste a SlideShare, Scribd, or public document-page link. DocGrab follows ordinary public assets without clicking download controls, preserves original PDF/PPTX files when available, and streams the process live.
           </p>
         </header>
 
@@ -102,8 +115,50 @@ export default function Home() {
 
         <History />
 
+        <section aria-labelledby="how-it-works" className="border-t border-border pt-8 grid gap-6 sm:grid-cols-3">
+          <div>
+            <h2 id="how-it-works" className="text-sm font-medium text-foreground">How DocGrab works</h2>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              Paste a public URL and DocGrab discovers the accessible document asset, retrieves the pages or original file, then returns a file you can save locally.
+            </p>
+          </div>
+          <div>
+            <h2 className="text-sm font-medium text-foreground">SlideShare and Scribd</h2>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              SlideShare downloads can use original PDF or PPTX assets when exposed. Public Scribd embeds are exported only when the page makes the required assets available.
+            </p>
+          </div>
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Embedded documents</h2>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              Public pages that embed a PDF or presentation can be inspected for ordinary file references without activating the page’s download buttons.
+            </p>
+          </div>
+        </section>
+
+        <section aria-labelledby="text-fidelity" className="border-t border-border pt-8">
+          <h2 id="text-fidelity" className="text-sm font-medium text-foreground">Selectable text and file fidelity</h2>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+            DocGrab keeps an original public PDF or PPTX when the source exposes one, which is the best path for preserving selectable text and editable presentation objects. If a source exposes only page images, the fallback PDF is necessarily image-based; it cannot create a reliable text layer that the source did not provide.
+          </p>
+        </section>
+
+        <section aria-labelledby="faq" className="border-t border-border pt-8">
+          <h2 id="faq" className="text-sm font-medium text-foreground">Frequently asked questions</h2>
+          <div className="mt-4 divide-y divide-border border-y border-border">
+            {faqs.map(({ question, answer }) => (
+              <details key={question} className="group py-3">
+                <summary className="cursor-pointer list-none pr-4 text-xs font-medium text-foreground marker:hidden">
+                  <span className="group-open:text-primary">{question}</span>
+                </summary>
+                <p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">{answer}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+
         <footer className="mt-auto pt-8 border-t border-border flex flex-col items-center gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-xs font-mono text-muted-foreground/60">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-xs font-mono text-muted-foreground/60 text-center">
             <span>slideshare · original-or-rendered pipeline</span>
             <span>scribd · public embed export</span>
             <span>public pages · direct asset discovery</span>

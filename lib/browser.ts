@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 import { getUserAgent } from "./user-agent"
 import type { Logger } from "./types"
 
@@ -20,7 +22,6 @@ export async function launchBrowser(log: Logger) {
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   ].filter(Boolean) as string[]
 
-  const { existsSync } = await import("fs")
   const commonArgs = [
     "--no-sandbox",
     "--disable-dev-shm-usage",
@@ -44,7 +45,37 @@ export async function launchBrowser(log: Logger) {
 
   log("info", "No local Chromium found, using serverless chromium build...")
   const chromium = (await import("@sparticuz/chromium")).default
-  const executablePath = await chromium.executablePath()
+  let executablePath: string
+  try {
+    executablePath = await chromium.executablePath()
+  } catch (error) {
+    // Next/Vercel can preserve either a flat external package path or the
+    // pnpm store path. If tracing kept the package but its default ESM path
+    // points at a relocated directory, pass the existing bin folder directly.
+    const binCandidates = [
+      join(process.cwd(), "node_modules/@sparticuz/chromium/bin"),
+      join(process.cwd(), "node_modules/.pnpm/@sparticuz+chromium@149.0.0/node_modules/@sparticuz/chromium/bin"),
+      "/var/task/node_modules/@sparticuz/chromium/bin",
+      "/var/task/node_modules/.pnpm/@sparticuz+chromium@149.0.0/node_modules/@sparticuz/chromium/bin",
+    ]
+
+    try {
+      const pnpmRoot = join(process.cwd(), "node_modules/.pnpm")
+      for (const entry of readdirSync(pnpmRoot)) {
+        if (entry.startsWith("@sparticuz+chromium@")) {
+          binCandidates.push(join(pnpmRoot, entry, "node_modules/@sparticuz/chromium/bin"))
+        }
+      }
+    } catch {
+      // Flat node_modules layouts do not have a pnpm store directory.
+    }
+
+    const tracedBin = binCandidates.find((candidate) => existsSync(candidate))
+    if (!tracedBin) throw error
+    log("info", `Using traced Chromium assets from: ${tracedBin}`)
+    executablePath = await chromium.executablePath(tracedBin)
+  }
+
   return puppeteer.launch({
     executablePath,
     headless: true,

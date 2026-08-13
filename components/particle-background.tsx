@@ -10,9 +10,16 @@ interface Dot {
   r: number
 }
 
+type Segment = [number, number, number, number]
+
 const POINTER_LINK_DIST = 180
 const DOT_LINK_DIST = 90
 const MAX_SPEED = 0.35
+const LINK_ALPHA_BUCKETS = 8
+
+function cellKey(x: number, y: number): string {
+  return `${x}:${y}`
+}
 
 export function ParticleBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -33,9 +40,13 @@ export function ParticleBackground() {
     let raf = 0
     const pointer = { x: -9999, y: -9999, active: false }
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const grid = new Map<string, number[]>()
+    const dotSegments: Segment[][] = Array.from({ length: LINK_ALPHA_BUCKETS }, () => [])
+    const pointerSegments: Segment[][] = Array.from({ length: LINK_ALPHA_BUCKETS }, () => [])
 
     const seed = () => {
-      // Density scales with area, capped to stay cheap on large screens.
+      // Keep the original visual density while preventing large canvases from
+      // creating an unbounded connection workload.
       const count = Math.min(110, Math.floor((width * height) / 16000))
       dots = Array.from({ length: count }, () => ({
         x: Math.random() * width,
@@ -75,6 +86,30 @@ export function ParticleBackground() {
       pointer.active = true
     }
 
+    const queueSegment = (segments: Segment[][], alpha: number, segment: Segment, maxAlpha: number) => {
+      const bucket = Math.min(
+        LINK_ALPHA_BUCKETS - 1,
+        Math.max(0, Math.floor((alpha / maxAlpha) * LINK_ALPHA_BUCKETS)),
+      )
+      segments[bucket].push(segment)
+    }
+
+    const strokeSegments = (segments: Segment[][], maxAlpha: number) => {
+      ctx.strokeStyle = "rgba(255, 255, 255, 1)"
+      for (let bucket = 0; bucket < segments.length; bucket++) {
+        const lines = segments[bucket]
+        if (lines.length === 0) continue
+        ctx.beginPath()
+        for (const [x1, y1, x2, y2] of lines) {
+          ctx.moveTo(x1, y1)
+          ctx.lineTo(x2, y2)
+        }
+        ctx.globalAlpha = ((bucket + 0.5) / LINK_ALPHA_BUCKETS) * maxAlpha
+        ctx.stroke()
+      }
+      ctx.globalAlpha = 1
+    }
+
     const tick = () => {
       ctx.clearRect(0, 0, width, height)
 
@@ -88,27 +123,44 @@ export function ParticleBackground() {
         else if (d.y > height + 10) d.y = -10
       }
 
-      // Dot-to-dot links (subtle).
-      ctx.lineWidth = 1
+      // Build a small spatial index. It checks the same 90px neighborhood as
+      // the original O(n²) loop, but avoids comparing distant dots at all.
+      grid.clear()
+      for (let i = 0; i < dots.length; i++) {
+        const d = dots[i]
+        const key = cellKey(Math.floor(d.x / DOT_LINK_DIST), Math.floor(d.y / DOT_LINK_DIST))
+        const bucket = grid.get(key)
+        if (bucket) bucket.push(i)
+        else grid.set(key, [i])
+      }
+
+      for (const segments of dotSegments) segments.length = 0
       for (let i = 0; i < dots.length; i++) {
         const a = dots[i]
-        for (let j = i + 1; j < dots.length; j++) {
-          const b = dots[j]
-          const dx = a.x - b.x
-          const dy = a.y - b.y
-          const distSq = dx * dx + dy * dy
-          if (distSq < DOT_LINK_DIST * DOT_LINK_DIST) {
-            const alpha = 0.06 * (1 - Math.sqrt(distSq) / DOT_LINK_DIST)
-            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`
-            ctx.beginPath()
-            ctx.moveTo(a.x, a.y)
-            ctx.lineTo(b.x, b.y)
-            ctx.stroke()
+        const cellX = Math.floor(a.x / DOT_LINK_DIST)
+        const cellY = Math.floor(a.y / DOT_LINK_DIST)
+        for (let offsetX = -1; offsetX <= 1; offsetX++) {
+          for (let offsetY = -1; offsetY <= 1; offsetY++) {
+            const candidates = grid.get(cellKey(cellX + offsetX, cellY + offsetY))
+            if (!candidates) continue
+            for (const j of candidates) {
+              if (j <= i) continue
+              const b = dots[j]
+              const dx = a.x - b.x
+              const dy = a.y - b.y
+              const distSq = dx * dx + dy * dy
+              if (distSq < DOT_LINK_DIST * DOT_LINK_DIST) {
+                const alpha = 0.06 * (1 - Math.sqrt(distSq) / DOT_LINK_DIST)
+                queueSegment(dotSegments, alpha, [a.x, a.y, b.x, b.y], 0.06)
+              }
+            }
           }
         }
       }
+      strokeSegments(dotSegments, 0.06)
 
       // Pointer links (stronger) + gentle attraction.
+      for (const segments of pointerSegments) segments.length = 0
       if (pointer.active) {
         for (const d of dots) {
           const dx = pointer.x - d.x
@@ -117,11 +169,7 @@ export function ParticleBackground() {
           if (distSq < POINTER_LINK_DIST * POINTER_LINK_DIST) {
             const dist = Math.sqrt(distSq)
             const alpha = 0.28 * (1 - dist / POINTER_LINK_DIST)
-            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`
-            ctx.beginPath()
-            ctx.moveTo(d.x, d.y)
-            ctx.lineTo(pointer.x, pointer.y)
-            ctx.stroke()
+            queueSegment(pointerSegments, alpha, [d.x, d.y, pointer.x, pointer.y], 0.28)
             // Slight pull toward the pointer.
             if (dist > 24) {
               d.vx += (dx / dist) * 0.004
@@ -135,6 +183,7 @@ export function ParticleBackground() {
             d.vy = (d.vy / speed) * MAX_SPEED
           }
         }
+        strokeSegments(pointerSegments, 0.28)
       }
 
       // Draw dots last so they sit on top of lines.

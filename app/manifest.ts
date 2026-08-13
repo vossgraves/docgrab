@@ -2,10 +2,10 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'DocGrab — SlideShare & Scribd to PDF Downloader',
+    name: 'DocGrab — Public SlideShare & Scribd Downloader',
     short_name: 'DocGrab',
     description:
-      'Download SlideShare presentations and Scribd documents as high-quality PDF files for free.',
+      'Download public SlideShare presentations, Scribd documents, and embedded PDF or PPTX files when the source exposes them.',
     start_url: '/',
     display: 'standalone',
     background_color: '#191919',
@@ -13,8 +13,15 @@ export default function manifest(): MetadataRoute.Manifest {
     icons: [
       {
         src: '/icon.png',
-        sizes: '512x512',
+        sizes: '1024x1024',
         type: 'image/png',
+        purpose: 'maskable',
+      },
+      {
+        src: '/apple-icon.png',
+        sizes: '180x180',
+        type: 'image/png',
+        purpose: 'any',
       },
     ],
   }

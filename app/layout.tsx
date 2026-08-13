@@ -2,20 +2,28 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { ClickRipple } from '@/components/click-ripple'
 import { ParticleBackground } from '@/components/particle-background'
+import { SITE_URL } from '@/lib/site'
 import './globals.css'
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://docgrab.vercel.app'
+const SITE_TITLE = 'SlideShare & Scribd Downloader | PDF & PPTX | DocGrab'
+const SITE_DESCRIPTION =
+  'Download public SlideShare presentations, Scribd documents, and embedded PDF or PPTX files. Preserve source text when available and follow each step in a live process log.'
+const SOCIAL_IMAGE = {
+  url: '/opengraph-image.png',
+  width: 1024,
+  height: 1024,
+  alt: 'DocGrab — download public SlideShare and Scribd documents as PDF or PPTX',
+}
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: 'DocGrab — Free SlideShare & Scribd to PDF Downloader',
+    default: SITE_TITLE,
     template: '%s | DocGrab',
   },
-  description:
-    'Download SlideShare presentations and Scribd documents as high-quality PDF files for free. Paste a link and DocGrab rebuilds every page into a clean PDF — no signup, no watermark, with a live process log.',
+  description: SITE_DESCRIPTION,
   applicationName: 'DocGrab',
-  generator: 'v0.app',
+  generator: 'Next.js',
   keywords: [
     'slideshare downloader',
     'scribd downloader',
@@ -23,11 +31,10 @@ export const metadata: Metadata = {
     'download scribd document',
     'slideshare to pdf',
     'scribd to pdf',
-    'free document downloader',
+    'pdf and pptx downloader',
+    'public document downloader',
     'presentation downloader',
-    'pdf downloader',
-    'download slideshare presentation',
-    'scribd pdf download free',
+    'preserve selectable text',
     'docgrab',
   ],
   authors: [{ name: 'Mhsm' }],
@@ -37,20 +44,25 @@ export const metadata: Metadata = {
   alternates: {
     canonical: '/',
   },
+  icons: {
+    icon: '/icon.png',
+    shortcut: '/icon.png',
+    apple: '/apple-icon.png',
+  },
   openGraph: {
     type: 'website',
-    url: siteUrl,
+    url: SITE_URL,
     siteName: 'DocGrab',
-    title: 'DocGrab — Free SlideShare & Scribd to PDF Downloader',
-    description:
-      'Paste a SlideShare or Scribd link and download it as a clean, high-quality PDF for free. No signup, no watermark.',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
     locale: 'en_US',
+    images: [SOCIAL_IMAGE],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'DocGrab — Free SlideShare & Scribd to PDF Downloader',
-    description:
-      'Paste a SlideShare or Scribd link and download it as a clean, high-quality PDF for free. No signup, no watermark.',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [SOCIAL_IMAGE.url],
   },
   robots: {
     index: true,
