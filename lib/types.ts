@@ -1,0 +1,57 @@
+export type LogLevel = "info" | "success" | "warn" | "error" | "step"
+
+export interface LogEvent {
+  type: "log"
+  level: LogLevel
+  message: string
+  timestamp: number
+}
+
+export interface ProgressEvent {
+  type: "progress"
+  current: number
+  total: number
+  label: string
+}
+
+export type OutputFormat = "pdf" | "pptx"
+export type Platform = "slideshare" | "scribd" | "public"
+
+export interface DownloadOptions {
+  format: OutputFormat
+  uploadToCatbox: boolean
+  /** Optional catbox.moe account userhash for permanent storage. */
+  catboxUserhash?: string
+}
+
+export interface ResultEvent {
+  type: "result"
+  id: string
+  title: string
+  pages: number
+  size: string
+  platform: Platform
+  format: OutputFormat
+  /** True when the returned file retains the source text/editable objects. */
+  textSelectable?: boolean
+  /** Present for public sources so the user can audit the selected asset. */
+  sourceUrl?: string
+  catboxUrl?: string
+  /** Set when the file was stored on litterbox (anonymous tier) and will expire. */
+  catboxExpiresAt?: number
+  /**
+   * Optional inline bytes. Small files use this for instant client-side download;
+   * larger files use the server-side file route to avoid Vercel payload limits.
+   */
+  fileBase64?: string
+}
+
+export interface ErrorEvent {
+  type: "error"
+  message: string
+}
+
+export type StreamEvent = LogEvent | ProgressEvent | ResultEvent | ErrorEvent
+
+export type Logger = (level: LogLevel, message: string) => void
+export type ProgressReporter = (current: number, total: number, label: string) => void

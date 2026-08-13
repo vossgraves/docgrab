@@ -1,0 +1,86 @@
+import { getUserAgent } from "./user-agent"
+import type { Logger } from "./types"
+
+/**
+ * Launch a normal headless Chrome/Chromium for public pages that require
+ * client-side rendering. It does not attempt to defeat authentication,
+ * paywalls, CAPTCHAs, or anti-bot controls. Local Chromium is preferred,
+ * then the serverless chromium build.
+ */
+export async function launchBrowser(log: Logger) {
+  const puppeteer = await import("puppeteer-core")
+
+  const localCandidates = [
+    process.env.CHROME_PATH,
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/opt/homebrew/bin/chromium",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ].filter(Boolean) as string[]
+
+  const { existsSync } = await import("fs")
+  const commonArgs = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--hide-scrollbars",
+  ]
+
+  for (const path of localCandidates) {
+    if (existsSync(path)) {
+      log("info", `Launching local Chromium: ${path}`)
+      return puppeteer.launch({
+        executablePath: path,
+        headless: true,
+        args: commonArgs,
+        // deviceScaleFactor: 2 renders pages at 2x resolution so image-based
+        // documents (e.g. Scribd) export as crisp, high-quality PDFs.
+        defaultViewport: { width: 1600, height: 2200, deviceScaleFactor: 2 },
+      })
+    }
+  }
+
+  log("info", "No local Chromium found, using serverless chromium build...")
+  const chromium = (await import("@sparticuz/chromium")).default
+  const executablePath = await chromium.executablePath()
+  return puppeteer.launch({
+    executablePath,
+    headless: true,
+    args: [...chromium.args, ...commonArgs],
+    defaultViewport: { width: 1600, height: 2200, deviceScaleFactor: 2 },
+  })
+}
+
+/**
+ * Fetch a page's fully rendered HTML using normal headless Chrome for
+ * public client-rendered pages.
+ */
+export async function fetchHtmlWithBrowser(url: string, log: Logger, timeoutMs = 60000): Promise<string | null> {
+  let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null
+  try {
+    browser = await launchBrowser(log)
+    const page = await browser.newPage()
+    await page.setUserAgent(getUserAgent())
+    page.setDefaultTimeout(timeoutMs)
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs })
+    try {
+      await page.waitForFunction(() => Boolean(document.body?.innerHTML.length), { timeout: 10000 })
+    } catch {
+      log("warn", "Public page did not finish rendering before the timeout")
+    }
+    return await page.content()
+  } catch (e) {
+    log("warn", `Browser fetch failed: ${e instanceof Error ? e.message : "unknown error"}`)
+    return null
+  } finally {
+    if (browser) {
+      try {
+        await browser.close()
+      } catch {
+        // ignore close errors
+      }
+    }
+  }
+}
