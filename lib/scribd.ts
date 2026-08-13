@@ -105,6 +105,37 @@ export async function downloadScribd(
     return false
   }
 
+  // The embed page HTML already contains every page definition
+  // (docManager.addPage blocks whose contentUrl points at a JSONP file on
+  // html.scribdassets.com, a public CDN). The in-page reader fetches those
+  // JSONPs with a page token that occasionally fails to refresh in a
+  // headless browser — every page load then errors and the embed renders
+  // zero pages, which surfaces as the misleading "No pages found" error.
+  // Fetch the JSONPs from Node instead and hand the bodies to the browser.
+  const fetchPageJsonp = async (rawUrl: string): Promise<string | null> => {
+    const fetchOne = async (url: string) => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 30000)
+      try {
+        const res = await fetch(url, {
+          headers: { "User-Agent": getUserAgent(), Accept: "*/*" },
+          signal: controller.signal,
+        })
+        if (!res.ok) return null
+        const text = await res.text()
+        return text.trim().length > 0 ? text : null
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    // Most docs serve bare public JSONPs; a few require the reader's page
+    // token. Try without the token first, then with the one the browser got.
+    const withoutToken = rawUrl.replace(/([?&])token=[^&#]+/, "$1")
+    return (await fetchOne(withoutToken)) ?? (await fetchOne(rawUrl))
+  }
+
   let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null
   try {
     log("step", "Launching headless browser...")
@@ -128,8 +159,39 @@ export async function downloadScribd(
     log("success", "Client challenge passed, session primed")
 
     log("info", `Loading embed page: ${embedUrl}`)
+    // Serve every JSONP page payload from Node so rendering no longer depends
+    // on the in-page token machinery (see fetchPageJsonp above).
+    await page.setRequestInterception(true)
+    page.on("request", (request) => {
+      if (/\.jsonp(?:$|[?#])/i.test(request.url())) {
+        fetchPageJsonp(request.url())
+          .then((body) => (body ? request.respond({ status: 200, contentType: "application/x-javascript", body }) : request.continue()))
+          .catch(() => request.continue().catch(() => {}))
+        return
+      }
+      request.continue().catch(() => {})
+    })
     await page.goto(embedUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
     await waitMillis(2500)
+
+    // Scribd's embed shows an explicit "unavailable" panel for documents the
+    // owner deleted or restricted. Report that accurately instead of the
+    // generic "no pages" message, and remember how many page definitions the
+    // HTML actually shipped so later failures can be diagnosed precisely.
+    const embedState = await page.evaluate(() => {
+      const haystack = `${document.body?.innerText?.slice(0, 4000) ?? ""}\n${document.documentElement?.outerHTML?.slice(0, 40000) ?? ""}`
+      return {
+        unavailable: /embeds_unavailable|document deleted by owner|can.t display this document/i.test(haystack),
+        pageDefs: (document.documentElement?.outerHTML?.match(/docManager\.addPage/g) ?? []).length,
+      }
+    })
+    log("info", `Embed page definitions: ${embedState.pageDefs} page${embedState.pageDefs === 1 ? "" : "s"}`)
+    if (embedState.unavailable) {
+      return {
+        error:
+          "This Scribd document is unavailable: it has been removed, deleted, or restricted by its owner.",
+      }
+    }
 
     // Remove cookie/consent banners
     log("info", "Removing consent banners and overlays...")
@@ -193,6 +255,13 @@ export async function downloadScribd(
             await waitMillis(3000)
             continue
           }
+          if (embedState.pageDefs === 0) {
+            return {
+              error: (await isChallengeShell(page))
+                ? "Scribd's anti-bot challenge blocked the embed from this server's network. Try again later."
+                : "This Scribd document is unavailable: it has been removed, deleted, or restricted by its owner.",
+            }
+          }
           return {
             error: (await isChallengeShell(page))
               ? "Scribd's anti-bot challenge blocked the embed from this server's network. Try again later."
@@ -234,6 +303,13 @@ export async function downloadScribd(
       await new Promise((r) => setTimeout(r, 450))
     }
     if (pageCount === 0) {
+      if (embedState.pageDefs === 0) {
+        return {
+          error: (await isChallengeShell(page))
+            ? "Scribd's anti-bot challenge blocked the embed from this server's network. Try again later."
+            : "This Scribd document is unavailable: it has been removed, deleted, or restricted by its owner.",
+        }
+      }
       return {
         error: (await isChallengeShell(page))
           ? "Scribd's anti-bot challenge blocked the embed from this server's network. Try again later."
