@@ -210,7 +210,7 @@ export async function downloadScribd(
       await waitMillis(1200)
       if (await isChallengeShell(page)) {
         log("info", "Embed is behind a client challenge; priming session via the document page...")
-        const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 25000)
+        const primed = await passClientChallenge(page, `https://www.scribd.com/document/${docId}`, 12000)
         if (!primed) {
           return {
             error:
