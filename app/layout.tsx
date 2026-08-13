@@ -1,5 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import { ClickRipple } from '@/components/click-ripple'
+import { ParticleBackground } from '@/components/particle-background'
 import './globals.css'
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://docgrab.vercel.app'
@@ -79,7 +81,9 @@ export default function RootLayout({
         <meta name="google-site-verification" content="w1VFE8NiJGnum9YfpEI4V1jjmnkou7X9huKEw8_Zd4c" />
       </head>
       <body className="antialiased font-sans">
+        <ParticleBackground />
         {children}
+        <ClickRipple />
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
