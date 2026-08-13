@@ -72,8 +72,9 @@
 
 /* Keep compositing work local to elements that visibly change. */
 button,
-a {
-  transition-property: color, background-color, border-color, opacity;
+a,
+label {
+  transition-property: transform, color, background-color, border-color, opacity;
   transition-duration: 150ms;
 }
 
@@ -98,7 +99,7 @@ a {
 @keyframes click-ping {
   0% {
     transform: translate(-50%, -50%) scale(0.2);
-    opacity: 0.55;
+    opacity: 0.6;
   }
   100% {
     transform: translate(-50%, -50%) scale(1);
