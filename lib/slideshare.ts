@@ -11,6 +11,8 @@ import type { Logger, ProgressReporter, DownloadOptions, OutputFormat } from "./
 
 const IMAGE_CONCURRENCY = 8
 const IMAGE_RETRIES = 2
+const IMAGE_TIMEOUT_MS = 8000
+const IMAGE_PROBE_TIMEOUT_MS = 9000
 
 interface SlideshareResult {
   id: string
@@ -25,14 +27,59 @@ interface SlideshareResult {
   sourceUrl?: string
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 30000): Promise<Response> {
+async function fetchTextWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 30000,
+): Promise<{ response: Response; text: string }> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    return await fetch(url, { ...options, signal: controller.signal })
+    const response = await fetch(url, { ...options, signal: controller.signal })
+    const text = await response.text()
+    return { response, text }
   } finally {
     clearTimeout(timer)
   }
+}
+
+async function fetchBytesWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 30000,
+): Promise<{ response: Response; bytes: Buffer }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal })
+    const bytes = Buffer.from(await response.arrayBuffer())
+    return { response, bytes }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * SlideShare can return a client challenge to serverless IPs even when the
+ * public page is available to ordinary browsers. The public HTML reader is
+ * used only as a fallback and only accepted when it exposes real slide CDN
+ * URLs; it does not click controls or bypass authentication.
+ */
+async function fetchPageViaPublicReader(url: string, log: Logger): Promise<string | null> {
+  const target = url.replace(/^https?:\/\//i, "")
+  const readerUrl = `https://r.jina.ai/http://${target}`
+  try {
+    log("info", "Direct page was challenge-gated; trying the public HTML reader...")
+    const { response: resp, text } = await fetchTextWithTimeout(readerUrl, { headers: { Accept: "text/plain,text/html" } }, 15000)
+    if (!resp.ok) return null
+    if (text.length > 1000 && /image\.slidesharecdn\.com\//i.test(text)) {
+      log("success", "Public HTML reader returned slide assets")
+      return text
+    }
+  } catch {
+    // Continue to the normal browser fallback below.
+  }
+  return null
 }
 
 /**
@@ -45,9 +92,8 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 async function fetchPageHtml(url: string, log: Logger): Promise<string | null> {
   try {
     log("info", "Fetching page directly...")
-    const resp = await fetchWithTimeout(url, { headers: { "User-Agent": getUserAgent(), Accept: "text/html" } }, 20000)
+    const { response: resp, text: html } = await fetchTextWithTimeout(url, { headers: { "User-Agent": getUserAgent(), Accept: "text/html" } }, 10000)
     if (resp.ok) {
-      const html = await resp.text()
       const hasSlideAssets = /image\.slidesharecdn\.com\//i.test(html) || /slidesharecdn\.com\//i.test(html)
       if (html.length > 1000 && hasSlideAssets) {
         log("success", "Direct fetch returned public page HTML with slide assets")
@@ -65,12 +111,16 @@ async function fetchPageHtml(url: string, log: Logger): Promise<string | null> {
     log("warn", "Direct fetch failed")
   }
 
+  const readerHtml = await fetchPageViaPublicReader(url, log)
+  if (readerHtml) return readerHtml
+
   log("step", "Falling back to normal headless browser rendering...")
   const browserHtml = await fetchHtmlWithBrowser(
     url,
     log,
-    60000,
+    35000,
     'img[src*="slidesharecdn.com"], img[data-src*="slidesharecdn.com"], source[srcset*="slidesharecdn.com"], [data-slide-image*="slidesharecdn.com"]',
+    8000,
   )
   if (browserHtml && browserHtml.length > 1000) {
     log("success", "Headless browser retrieved public page HTML")
@@ -88,12 +138,16 @@ interface SlideInfo {
   qualityDirs: string[]
   /** Largest image width (e.g. 2048) actually seen in the page HTML. */
   maxSeenSize: number
+  /** Exact size/quality pairs exposed by the public page, in first-seen order. */
+  observedVariants: Array<{ dir: string; size: number }>
 }
 
 function extractSlideInfo(html: string): SlideInfo | null {
   const pageNums = new Set<number>()
   const qualityDirs = new Set<string>()
   const sizes = new Set<number>()
+  const observedVariants: Array<{ dir: string; size: number }> = []
+  const observedVariantKeys = new Set<string>()
   let baseUrl: string | null = null
   let titleSlug: string | null = null
 
@@ -106,9 +160,16 @@ function extractSlideInfo(html: string): SlideInfo | null {
         baseUrl = m[1]
         titleSlug = m[3]
       }
-      qualityDirs.add(m[2])
+      const dir = m[2]
+      const size = Number.parseInt(m[5], 10)
+      qualityDirs.add(dir)
       pageNums.add(Number.parseInt(m[4], 10))
-      sizes.add(Number.parseInt(m[5], 10))
+      sizes.add(size)
+      const variantKey = `${dir}:${size}`
+      if (!observedVariantKeys.has(variantKey)) {
+        observedVariantKeys.add(variantKey)
+        observedVariants.push({ dir, size })
+      }
     }
   }
 
@@ -119,6 +180,7 @@ function extractSlideInfo(html: string): SlideInfo | null {
     maxPage: Math.max(...pageNums),
     qualityDirs: [...qualityDirs],
     maxSeenSize: sizes.size > 0 ? Math.max(...sizes) : 0,
+    observedVariants: observedVariants.sort((a, b) => b.size - a.size),
   }
 }
 
@@ -147,10 +209,22 @@ const QUALITY_DIRS = ["95", "85", "75"]
 function buildCandidates(info: SlideInfo, pageNum: number): string[] {
   const dirs = [...new Set([...info.qualityDirs, ...QUALITY_DIRS])]
   const candidates: string[] = []
-  for (const size of SIZES) {
-    for (const dir of dirs) {
-      candidates.push(`${info.baseUrl}/${dir}/${info.titleSlug}-${pageNum}-${size}.jpg`)
+  const seen = new Set<string>()
+  const add = (dir: string, size: number) => {
+    const url = `${info.baseUrl}/${dir}/${info.titleSlug}-${pageNum}-${size}.jpg`
+    if (!seen.has(url)) {
+      seen.add(url)
+      candidates.push(url)
     }
+  }
+
+  // Probe exact pairs observed in the public HTML first. This avoids spending
+  // the probe budget on synthesized high-resolution paths that the CDN may
+  // not serve to serverless fetchers while retaining the best available
+  // public asset when it is present.
+  for (const variant of info.observedVariants) add(variant.dir, variant.size)
+  for (const size of SIZES) {
+    for (const dir of dirs) add(dir, size)
   }
   return candidates
 }
@@ -179,12 +253,16 @@ function isWebp(buf: Buffer): boolean {
  * `trace` (used only during the page-1 probe) reports why a candidate failed
  * so quality regressions are visible in the process log instead of silent.
  */
-async function fetchJpeg(url: string, trace?: (reason: string) => void): Promise<Buffer | null> {
-  for (let attempt = 0; attempt <= IMAGE_RETRIES; attempt++) {
+async function fetchJpeg(
+  url: string,
+  trace?: (reason: string) => void,
+  timeoutMs = IMAGE_TIMEOUT_MS,
+  retryCount = IMAGE_RETRIES,
+): Promise<Buffer | null> {
+  for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
-      const resp = await fetchWithTimeout(url, { headers: { "User-Agent": getUserAgent(), Accept: "image/jpeg,image/*" } }, 20000)
+      const { response: resp, bytes: buf } = await fetchBytesWithTimeout(url, { headers: { "User-Agent": getUserAgent(), Accept: "image/jpeg,image/*" } }, timeoutMs)
       if (resp.ok) {
-        const buf = Buffer.from(await resp.arrayBuffer())
         if (isJpeg(buf)) return buf
         if (isWebp(buf)) {
           const jpeg = await webpToJpeg(buf, 92)
@@ -199,7 +277,7 @@ async function fetchJpeg(url: string, trace?: (reason: string) => void): Promise
       return null // non-OK or unsupported format: this variant doesn't exist, don't retry
     } catch (err) {
       // network error: retry with backoff
-      if (attempt < IMAGE_RETRIES) {
+      if (attempt < retryCount) {
         await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
       } else {
         trace?.(`network error: ${err instanceof Error ? err.message : String(err)}`)
@@ -218,21 +296,38 @@ async function resolveBestVariant(
   info: SlideInfo,
   log: Logger,
 ): Promise<{ dir: string; size: number; firstPage: Buffer } | null> {
-  for (const url of buildCandidates(info, 1)) {
-    const variant = url.match(/\/(\d+)\/.+-1-(\d+)\.jpg$/)
-    const label = variant ? `${variant[2]}px (/${variant[1]}/)` : url
-    const buf = await fetchJpeg(url, (reason) => {
-      // Plain 404s just mean the CDN never generated that variant — not a failure.
-      if (reason !== "HTTP 404") log("warn", `Variant ${label} unavailable: ${reason}`)
-    })
-    if (buf) {
-      const dir = variant ? variant[1] : QUALITY_DIRS[0]
-      const size = variant ? Number.parseInt(variant[2], 10) : SIZES[0]
-      log("success", `Best available quality: ${size}px (quality dir /${dir}/)`)
-      return { dir, size, firstPage: buf }
+  const candidates = buildCandidates(info, 1)
+  const results: Array<{ index: number; url: string; buffer: Buffer }> = []
+  let next = 0
+  const probe = async () => {
+    while (next < candidates.length) {
+      const index = next++
+      const url = candidates[index]
+      const variant = url.match(/\/(\d+)\/.+-1-(\d+)\.jpg$/)
+      const label = variant ? `${variant[2]}px (/${variant[1]}/)` : url
+      const buffer = await fetchJpeg(
+        url,
+        (reason) => {
+          // Plain 404s just mean the CDN never generated that variant — not a failure.
+          if (reason !== "HTTP 404") log("warn", `Variant ${label} unavailable: ${reason}`)
+        },
+        IMAGE_PROBE_TIMEOUT_MS,
+        0,
+      )
+      if (buffer) results.push({ index, url, buffer })
     }
   }
-  return null
+  await Promise.all(Array.from({ length: Math.min(8, candidates.length) }, () => probe()))
+
+  // Candidate order is largest size first, then best quality directory. All probes
+  // run concurrently, but selection remains deterministic and prefers the best result.
+  const winner = results.sort((a, b) => a.index - b.index)[0]
+  if (!winner) return null
+  const variant = winner.url.match(/\/(\d+)\/.+-1-(\d+)\.jpg$/)
+  const dir = variant ? variant[1] : QUALITY_DIRS[0]
+  const size = variant ? Number.parseInt(variant[2], 10) : SIZES[0]
+  log("success", `Best available quality: ${size}px (quality dir /${dir}/)`)
+  return { dir, size, firstPage: winner.buffer }
 }
 
 /** Download a single slide at the resolved best variant, falling back to smaller sizes only if needed. */
@@ -242,9 +337,11 @@ async function downloadSlide(info: SlideInfo, pageNum: number, bestDir: string, 
   const buf = await fetchJpeg(primary)
   if (buf) return buf
 
-  // Rare per-page miss: fall back through remaining candidates for this page.
+  // Rare per-page miss: fall back through the selected size and smaller variants.
+  // Avoid probing larger, slower variants after a deck-wide fast variant was chosen.
   for (const url of buildCandidates(info, pageNum)) {
-    if (url === primary) continue
+    const variant = url.match(/\/(\d+)\/.+-(\d+)\.jpg$/)
+    if (url === primary || (variant && Number.parseInt(variant[2], 10) > bestSize)) continue
     const fallback = await fetchJpeg(url)
     if (fallback) return fallback
   }

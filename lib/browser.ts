@@ -93,6 +93,7 @@ export async function fetchHtmlWithBrowser(
   log: Logger,
   timeoutMs = 60000,
   readySelector?: string,
+  readyTimeoutMs = 20000,
 ): Promise<string | null> {
   let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null
   try {
@@ -108,7 +109,7 @@ export async function fetchHtmlWithBrowser(
     }
     if (readySelector) {
       try {
-        await page.waitForSelector(readySelector, { timeout: Math.min(timeoutMs, 20000) })
+        await page.waitForSelector(readySelector, { timeout: Math.min(timeoutMs, readyTimeoutMs) })
       } catch {
         log("warn", `Public page did not expose the expected asset marker: ${readySelector}`)
       }
