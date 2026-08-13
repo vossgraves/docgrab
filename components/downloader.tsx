@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { Link2, Loader2, Cloud } from "lucide-react"
 import { LogConsole, type LogEntry } from "./log-console"
 import { ResultCard, type GrabResult } from "./result-card"
@@ -34,6 +34,8 @@ export function Downloader() {
   const [result, setResult] = useState<GrabResult | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const submittedUrlRef = useRef("")
+  const pendingLogsRef = useRef<LogEntry[]>([])
+  const logFlushTimerRef = useRef<number | null>(null)
 
   const platform = detectPlatformLabel(url)
   const isRunning = status === "running"
@@ -41,7 +43,23 @@ export function Downloader() {
   const effectiveFormat: OutputFormat = pptxDisabled ? "pdf" : format
 
   const addLog = useCallback((entry: LogEntry) => {
-    setLogs((prev) => [...prev, entry])
+    pendingLogsRef.current.push(entry)
+    if (logFlushTimerRef.current) return
+
+    // Stream events can arrive faster than a low-end device can paint. Coalesce
+    // them into short batches and retain only the most useful recent activity.
+    logFlushTimerRef.current = window.setTimeout(() => {
+      const batch = pendingLogsRef.current
+      pendingLogsRef.current = []
+      logFlushTimerRef.current = null
+      if (batch.length) setLogs((prev) => [...prev, ...batch].slice(-120))
+    }, 80)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (logFlushTimerRef.current) window.clearTimeout(logFlushTimerRef.current)
+    }
   }, [])
 
   const handleEvent = useCallback(
@@ -119,6 +137,9 @@ export function Downloader() {
     abortRef.current = controller
 
     setStatus("running")
+    if (logFlushTimerRef.current) window.clearTimeout(logFlushTimerRef.current)
+    logFlushTimerRef.current = null
+    pendingLogsRef.current = []
     setLogs([])
     setResult(null)
     setProgress(null)

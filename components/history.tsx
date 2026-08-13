@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { Cloud, Download, Trash2, History as HistoryIcon } from "lucide-react"
 import { getHistory, removeHistoryItem, clearHistory, type HistoryItem } from "@/lib/history"
 
@@ -18,26 +18,34 @@ function expiryLabel(expiresAt: number): string {
 export function History() {
   const [items, setItems] = useState<HistoryItem[]>([])
   const [mounted, setMounted] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
   const refresh = useCallback(() => setItems(getHistory()), [])
 
   useEffect(() => {
-    setMounted(true)
-    refresh()
+    // Leave the main downloader responsive while the browser paints and handles
+    // its first input. History is secondary content and can hydrate shortly after.
+    const timer = window.setTimeout(() => {
+      refresh()
+      setMounted(true)
+    }, 200)
     const onChange = () => refresh()
     window.addEventListener("docgrab:history-changed", onChange)
     window.addEventListener("storage", onChange)
     return () => {
+      window.clearTimeout(timer)
       window.removeEventListener("docgrab:history-changed", onChange)
       window.removeEventListener("storage", onChange)
     }
   }, [refresh])
 
-  // Avoid hydration mismatch: render nothing until mounted on the client.
+  const visibleItems = useMemo(() => (showAll ? items : items.slice(0, 10)), [items, showAll])
+
+  // Avoid hydration mismatch and keep nonessential content out of the first paint.
   if (!mounted) return null
 
   return (
-    <section aria-label="Saved history" className="flex flex-col gap-3">
+    <section aria-label="Saved history" className="render-auto flex flex-col gap-3">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <HistoryIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
@@ -62,8 +70,9 @@ export function History() {
           {"No saved files yet. Tick \"Save to catbox.moe\" before grabbing to keep files here."}
         </p>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {items.map((item) => (
+        <>
+          <ul className="flex flex-col gap-2">
+          {visibleItems.map((item) => (
             <li
               key={item.id}
               className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
@@ -95,7 +104,17 @@ export function History() {
               </button>
             </li>
           ))}
-        </ul>
+          </ul>
+          {items.length > visibleItems.length && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="self-start text-xs font-mono text-muted-foreground hover:text-foreground"
+            >
+              Show {items.length - visibleItems.length} older {items.length - visibleItems.length === 1 ? "item" : "items"}
+            </button>
+          )}
+        </>
       )}
     </section>
   )

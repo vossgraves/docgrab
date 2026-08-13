@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { memo, useEffect, useRef } from "react"
 import type { LogLevel } from "@/lib/types"
 
 export interface LogEntry {
@@ -28,7 +28,7 @@ interface LogConsoleProps {
   progress: { current: number; total: number; label: string } | null
 }
 
-export function LogConsole({ logs, isRunning, progress }: LogConsoleProps) {
+export const LogConsole = memo(function LogConsole({ logs, isRunning, progress }: LogConsoleProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function LogConsole({ logs, isRunning, progress }: LogConsoleProps) {
   }, [logs, progress])
 
   return (
-    <section aria-label="Process logs" className="rounded-lg border border-border bg-card overflow-hidden">
+    <section aria-label="Process logs" className="render-auto rounded-lg border border-border bg-card overflow-hidden">
       <header className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span
@@ -115,4 +115,4 @@ export function LogConsole({ logs, isRunning, progress }: LogConsoleProps) {
       </div>
     </section>
   )
-}
+})
