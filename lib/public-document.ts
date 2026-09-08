@@ -134,7 +134,7 @@ function isPrivateIp(address: string): boolean {
 
 export async function assertPublicUrl(rawUrl: string): Promise<void> {
   const parsed = new URL(rawUrl)
-  const hostname = parsed.hostname.toLowerCase().replace(/[\[\]]/g, "").replace(/\.$/, "")
+  const hostname = parsed.hostname.toLowerCase().replace(/[[\]]/g, "").replace(/\.$/, "")
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Only HTTP(S) document sources are supported.")
   if (!hostname || hostname === "localhost" || hostname.endsWith(".local") || hostname.endsWith(".internal") || isPrivateIp(hostname)) {
     throw new Error("Private or local document sources are not allowed.")
@@ -326,7 +326,14 @@ export async function downloadPublicDocument(
   let candidates: PublicDocumentCandidate[] = []
 
   const directExtension = extensionFromUrl(url)
-  if (!directExtension) {
+  if (directExtension) {
+    candidates = [{ url, extension: directExtension, score: 0 }]
+    try {
+      title = new URL(url).pathname.split("/").pop()?.replace(/\.(pdf|pptx?)$/i, "") || title
+    } catch {
+      // Keep fallback title.
+    }
+  } else {
     try {
       log("step", "Inspecting page markup for public document assets...")
       let html = pageHtml
@@ -350,13 +357,6 @@ export async function downloadPublicDocument(
       log("info", `Found ${candidates.length} public document candidate${candidates.length === 1 ? "" : "s"}`)
     } catch (error) {
       return { error: `Could not inspect the source page: ${error instanceof Error ? error.message : "unknown error"}` }
-    }
-  } else {
-    candidates = [{ url, extension: directExtension, score: 0 }]
-    try {
-      title = new URL(url).pathname.split("/").pop()?.replace(/\.(pdf|pptx?)$/i, "") || title
-    } catch {
-      // Keep fallback title.
     }
   }
 

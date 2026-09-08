@@ -14,37 +14,37 @@
  */
 
 /** Current desktop Chrome major versions (stable +/- a couple of releases). */
-const CHROME_MAJORS = [124, 125, 126, 127, 128]
+const CHROME_MAJORS = [124, 125, 126, 127, 128];
 
 /** Realistic desktop platform strings. */
 const PLATFORMS = [
-  "Windows NT 10.0; Win64; x64",
-  "Macintosh; Intel Mac OS X 10_15_7",
-  "X11; Linux x86_64",
-]
+ "Windows NT 10.0; Win64; x64",
+ "Macintosh; Intel Mac OS X 10_15_7",
+ "X11; Linux x86_64",
+];
 
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]
+ return arr[Math.floor(Math.random() * arr.length)];
 }
 
 /** Generate a fresh, realistic Chrome desktop User-Agent. */
 export function generateUserAgent(): string {
-  const major = pick(CHROME_MAJORS)
-  const platform = pick(PLATFORMS)
-  return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+ const major = pick(CHROME_MAJORS);
+ const platform = pick(PLATFORMS);
+ return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
 }
 
-let activeUA = generateUserAgent()
+let activeUA = generateUserAgent();
 
 /**
  * Register one download job and rotate to a brand new UA immediately, so
  * every download looks like a first-time visitor.
  */
 export function registerDownload(): void {
-  activeUA = generateUserAgent()
+ activeUA = generateUserAgent();
 }
 
 /** The currently active User-Agent. Fresh for every registered download. */
 export function getUserAgent(): string {
-  return activeUA
+ return activeUA;
 }

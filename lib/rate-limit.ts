@@ -9,69 +9,76 @@
  */
 
 interface Window {
-  /** Timestamps (ms) of requests within the current window. */
-  hits: number[]
+ /** Timestamps (ms) of requests within the current window. */
+ hits: number[];
 }
 
-const WINDOW_MS = 10 * 60 * 1000 // 10 minutes
-const MAX_REQUESTS = 5 // per window per IP
-const MAX_TRACKED_IPS = 10_000 // hard cap so the map can never grow unbounded
+const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_REQUESTS = 5; // per window per IP
+const MAX_TRACKED_IPS = 10_000; // hard cap so the map can never grow unbounded
 
-const windows = new Map<string, Window>()
+const windows = new Map<string, Window>();
 
 /** Periodically prune stale entries so long-lived instances stay lean. */
-let lastSweep = Date.now()
+let lastSweep = Date.now();
 function sweep(now: number) {
-  if (now - lastSweep < WINDOW_MS) return
-  lastSweep = now
-  for (const [key, win] of windows) {
-    win.hits = win.hits.filter((t) => now - t < WINDOW_MS)
-    if (win.hits.length === 0) windows.delete(key)
-  }
+ if (now - lastSweep < WINDOW_MS) return;
+ lastSweep = now;
+ for (const [key, win] of windows) {
+  win.hits = win.hits.filter((t) => now - t < WINDOW_MS);
+  if (win.hits.length === 0) windows.delete(key);
+ }
 }
 
 export interface RateLimitResult {
-  allowed: boolean
-  /** Requests remaining in the current window. */
-  remaining: number
-  /** Seconds until the oldest hit falls out of the window (when blocked). */
-  retryAfterSeconds: number
+ allowed: boolean;
+ /** Requests remaining in the current window. */
+ remaining: number;
+ /** Seconds until the oldest hit falls out of the window (when blocked). */
+ retryAfterSeconds: number;
 }
 
 export function checkRateLimit(clientKey: string): RateLimitResult {
-  const now = Date.now()
-  sweep(now)
+ const now = Date.now();
+ sweep(now);
 
-  let win = windows.get(clientKey)
-  if (!win) {
-    // Refuse to track new clients past the cap rather than allowing unbounded memory.
-    if (windows.size >= MAX_TRACKED_IPS) {
-      return { allowed: false, remaining: 0, retryAfterSeconds: 60 }
-    }
-    win = { hits: [] }
-    windows.set(clientKey, win)
+ let win = windows.get(clientKey);
+ if (!win) {
+  // Refuse to track new clients past the cap rather than allowing unbounded memory.
+  if (windows.size >= MAX_TRACKED_IPS) {
+   return { allowed: false, remaining: 0, retryAfterSeconds: 60 };
   }
+  win = { hits: [] };
+  windows.set(clientKey, win);
+ }
 
-  win.hits = win.hits.filter((t) => now - t < WINDOW_MS)
+ win.hits = win.hits.filter((t) => now - t < WINDOW_MS);
 
-  if (win.hits.length >= MAX_REQUESTS) {
-    const oldest = win.hits[0]
-    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + WINDOW_MS - now) / 1000))
-    return { allowed: false, remaining: 0, retryAfterSeconds }
-  }
+ if (win.hits.length >= MAX_REQUESTS) {
+  const oldest = win.hits[0];
+  const retryAfterSeconds = Math.max(
+   1,
+   Math.ceil((oldest + WINDOW_MS - now) / 1000),
+  );
+  return { allowed: false, remaining: 0, retryAfterSeconds };
+ }
 
-  win.hits.push(now)
-  return { allowed: true, remaining: MAX_REQUESTS - win.hits.length, retryAfterSeconds: 0 }
+ win.hits.push(now);
+ return {
+  allowed: true,
+  remaining: MAX_REQUESTS - win.hits.length,
+  retryAfterSeconds: 0,
+ };
 }
 
 /** Extract the best-effort client IP from a Next.js request. */
 export function getClientIp(headers: Headers): string {
-  const forwarded = headers.get("x-forwarded-for")
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim()
-    if (first) return first
-  }
-  return headers.get("x-real-ip")?.trim() || "unknown"
+ const forwarded = headers.get("x-forwarded-for");
+ if (forwarded) {
+  const first = forwarded.split(",")[0]?.trim();
+  if (first) return first;
+ }
+ return headers.get("x-real-ip")?.trim() || "unknown";
 }
 
 /**
@@ -84,16 +91,16 @@ export function getClientIp(headers: Headers): string {
  * cryptographic identity — an attacker can still rotate both values.
  */
 export function getClientKey(headers: Headers): string {
-  const ip = getClientIp(headers)
-  const ua = headers.get("user-agent")?.trim() || "no-ua"
-  return `${ip}::${djb2(ua)}`
+ const ip = getClientIp(headers);
+ const ua = headers.get("user-agent")?.trim() || "no-ua";
+ return `${ip}::${djb2(ua)}`;
 }
 
 /** Small, fast non-crypto hash to keep the UA portion compact and bounded. */
 function djb2(str: string): string {
-  let hash = 5381
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 33) ^ str.charCodeAt(i)
-  }
-  return (hash >>> 0).toString(36)
+ let hash = 5381;
+ for (let i = 0; i < str.length; i++) {
+  hash = (hash * 33) ^ str.charCodeAt(i);
+ }
+ return (hash >>> 0).toString(36);
 }

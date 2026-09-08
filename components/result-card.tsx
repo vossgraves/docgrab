@@ -1,23 +1,22 @@
-
-import { FileText, Download, Cloud, ExternalLink } from "lucide-react"
-import type { OutputFormat, Platform } from "@/lib/types"
+import { FileText, Download, Cloud, ExternalLink } from "lucide-react";
+import type { OutputFormat, Platform } from "@/lib/types";
 
 export interface GrabResult {
-  id: string
-  title: string
-  pages: number
-  size: string
-  platform: Platform
-  format: OutputFormat
-  textSelectable?: boolean
-  sourceUrl?: string
-  cachedUrl?: string
-  cachedExpiresAt?: number
-  cacheHit?: boolean
-  catboxUrl?: string
-  catboxExpiresAt?: number
+  id: string;
+  title: string;
+  pages: number;
+  size: string;
+  platform: Platform;
+  format: OutputFormat;
+  textSelectable?: boolean;
+  sourceUrl?: string;
+  cachedUrl?: string;
+  cachedExpiresAt?: number;
+  cacheHit?: boolean;
+  catboxUrl?: string;
+  catboxExpiresAt?: number;
   /** Local blob URL built from inline file bytes — works regardless of server instance. */
-  blobUrl?: string
+  blobUrl?: string;
 }
 
 function safeFileName(title: string, format: OutputFormat): string {
@@ -25,13 +24,17 @@ function safeFileName(title: string, format: OutputFormat): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 80)
-  return `${slug || "document"}.${format}`
+    .slice(0, 80);
+  return `${slug || "document"}.${format}`;
 }
 
 export function ResultCard({ result }: { result: GrabResult }) {
-  const formatLabel = result.format.toUpperCase()
-  const downloadHref = result.blobUrl ?? result.cachedUrl ?? result.catboxUrl ?? `/api/file/${result.id}`
+  const formatLabel = result.format.toUpperCase();
+  const downloadHref =
+    result.blobUrl ??
+    result.cachedUrl ??
+    result.catboxUrl ??
+    `/api/file/${result.id}`;
 
   return (
     <section
@@ -44,9 +47,12 @@ export function ResultCard({ result }: { result: GrabResult }) {
             <FileText className="size-5 text-primary" aria-hidden="true" />
           </div>
           <div className="min-w-0">
-            <h3 className="text-sm font-medium text-foreground truncate text-balance">{result.title}</h3>
+            <h3 className="text-sm font-medium text-foreground truncate text-balance">
+              {result.title}
+            </h3>
             <p className="text-xs font-mono text-muted-foreground mt-1">
-              {result.platform} · {formatLabel} · {result.pages} pages · {result.size}
+              {result.platform} · {formatLabel} · {result.pages} pages ·{" "}
+              {result.size}
             </p>
             <p className="text-xs text-muted-foreground/80 mt-2">
               {result.textSelectable
@@ -72,7 +78,10 @@ export function ResultCard({ result }: { result: GrabResult }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors break-all"
         >
-          <ExternalLink className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <ExternalLink
+            className="size-3.5 shrink-0 text-primary"
+            aria-hidden="true"
+          />
           <span className="truncate">Source asset</span>
         </a>
       )}
@@ -84,7 +93,10 @@ export function ResultCard({ result }: { result: GrabResult }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors break-all"
         >
-          <Cloud className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <Cloud
+            className="size-3.5 shrink-0 text-primary"
+            aria-hidden="true"
+          />
           <span className="truncate">Cached on Vercel Blob</span>
           {result.cachedExpiresAt && (
             <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground/70">
@@ -101,7 +113,10 @@ export function ResultCard({ result }: { result: GrabResult }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors break-all"
         >
-          <Cloud className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <Cloud
+            className="size-3.5 shrink-0 text-primary"
+            aria-hidden="true"
+          />
           <span className="truncate">{result.catboxUrl}</span>
           {result.catboxExpiresAt && (
             <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground/70">
@@ -111,5 +126,5 @@ export function ResultCard({ result }: { result: GrabResult }) {
         </a>
       )}
     </section>
-  )
+  );
 }

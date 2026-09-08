@@ -1,95 +1,113 @@
-"use client"
+"use client";
 
-import { useState, useRef, useCallback, useEffect } from "react"
-import { Link2, Loader2, Cloud } from "lucide-react"
-import { LogConsole, type LogEntry } from "./log-console"
-import { ResultCard, type GrabResult } from "./result-card"
-import { addHistoryItem } from "@/lib/history"
-import type { StreamEvent, OutputFormat } from "@/lib/types"
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Link2, Loader2, Cloud } from "lucide-react";
+import { LogConsole, type LogEntry } from "./log-console";
+import { ResultCard, type GrabResult } from "./result-card";
+import { addHistoryItem } from "@/lib/history";
+import type { StreamEvent, OutputFormat } from "@/lib/types";
 
-type Status = "idle" | "running" | "done" | "error"
+type Status = "idle" | "running" | "done" | "error";
 
 function detectPlatformLabel(url: string): string | null {
-  const trimmed = url.trim()
-  if (!trimmed) return null
+  const trimmed = url.trim();
+  if (!trimmed) return null;
   try {
-    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-    const host = new URL(normalized).hostname.toLowerCase()
-    if (host === "slideshare.net" || host.endsWith(".slideshare.net")) return "slideshare"
-    if (host === "scribd.com" || host.endsWith(".scribd.com")) return "scribd"
-    return "public"
+    const normalized = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    const host = new URL(normalized).hostname.toLowerCase();
+    if (host === "slideshare.net" || host.endsWith(".slideshare.net"))
+      return "slideshare";
+    if (host === "scribd.com" || host.endsWith(".scribd.com")) return "scribd";
+    return "public";
   } catch {
-    return null
+    return null;
   }
 }
 
 export function Downloader() {
-  const [url, setUrl] = useState("")
-  const [format, setFormat] = useState<OutputFormat>("pdf")
-  const [saveToCatbox, setSaveToCatbox] = useState(false)
-  const [catboxUserhash, setCatboxUserhash] = useState("")
-  const [status, setStatus] = useState<Status>("idle")
-  const [logs, setLogs] = useState<LogEntry[]>([])
-  const [progress, setProgress] = useState<{ current: number; total: number; label: string } | null>(null)
-  const [result, setResult] = useState<GrabResult | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-  const submittedUrlRef = useRef("")
-  const pendingLogsRef = useRef<LogEntry[]>([])
-  const logFlushTimerRef = useRef<number | null>(null)
+  const [url, setUrl] = useState("");
+  const [format, setFormat] = useState<OutputFormat>("pdf");
+  const [saveToCatbox, setSaveToCatbox] = useState(false);
+  const [catboxUserhash, setCatboxUserhash] = useState("");
+  const [status, setStatus] = useState<Status>("idle");
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+    label: string;
+  } | null>(null);
+  const [result, setResult] = useState<GrabResult | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const submittedUrlRef = useRef("");
+  const pendingLogsRef = useRef<LogEntry[]>([]);
+  const logFlushTimerRef = useRef<number | null>(null);
 
-  const platform = detectPlatformLabel(url)
-  const isRunning = status === "running"
-  const pptxDisabled = platform === "scribd"
-  const effectiveFormat: OutputFormat = pptxDisabled ? "pdf" : format
+  const platform = detectPlatformLabel(url);
+  const isRunning = status === "running";
+  const pptxDisabled = platform === "scribd";
+  const effectiveFormat: OutputFormat = pptxDisabled ? "pdf" : format;
 
   const addLog = useCallback((entry: LogEntry) => {
-    pendingLogsRef.current.push(entry)
-    if (logFlushTimerRef.current) return
+    pendingLogsRef.current.push(entry);
+    if (logFlushTimerRef.current) return;
 
     // Stream events can arrive faster than a low-end device can paint. Coalesce
     // them into short batches and retain only the most useful recent activity.
     logFlushTimerRef.current = window.setTimeout(() => {
-      const batch = pendingLogsRef.current
-      pendingLogsRef.current = []
-      logFlushTimerRef.current = null
-      if (batch.length) setLogs((prev) => [...prev, ...batch].slice(-120))
-    }, 80)
-  }, [])
+      const batch = pendingLogsRef.current;
+      pendingLogsRef.current = [];
+      logFlushTimerRef.current = null;
+      if (batch.length) setLogs((prev) => [...prev, ...batch].slice(-120));
+    }, 80);
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (logFlushTimerRef.current) window.clearTimeout(logFlushTimerRef.current)
-    }
-  }, [])
+      if (logFlushTimerRef.current)
+        window.clearTimeout(logFlushTimerRef.current);
+    };
+  }, []);
 
   const handleEvent = useCallback(
     (event: StreamEvent) => {
       switch (event.type) {
         case "log":
-          addLog({ level: event.level, message: event.message, timestamp: event.timestamp })
-          if (event.level === "step") setProgress(null)
-          break
+          addLog({
+            level: event.level,
+            message: event.message,
+            timestamp: event.timestamp,
+          });
+          if (event.level === "step") setProgress(null);
+          break;
         case "progress":
-          setProgress({ current: event.current, total: event.total, label: event.label })
-          break
+          setProgress({
+            current: event.current,
+            total: event.total,
+            label: event.label,
+          });
+          break;
         case "result": {
           // Build a local blob URL from the inline bytes so the download works
           // even on serverless hosting where /tmp is per-instance.
-          let blobUrl: string | undefined
+          let blobUrl: string | undefined;
           if (event.fileBase64) {
             try {
-              const bytes = Uint8Array.from(atob(event.fileBase64), (c) => c.charCodeAt(0))
+              const bytes = Uint8Array.from(atob(event.fileBase64), (c) =>
+                c.charCodeAt(0),
+              );
               const mime =
                 event.format === "pptx"
                   ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                  : "application/pdf"
-              blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }))
+                  : "application/pdf";
+              blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
             } catch {
               // Fall back to the server file route below.
             }
           }
           setResult((prev) => {
-            if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl)
+            if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
             return {
               id: event.id,
               title: event.title,
@@ -105,8 +123,8 @@ export function Downloader() {
               catboxUrl: event.catboxUrl,
               catboxExpiresAt: event.catboxExpiresAt,
               blobUrl,
-            }
-          })
+            };
+          });
           if (event.catboxUrl) {
             addHistoryItem({
               title: event.title,
@@ -117,36 +135,36 @@ export function Downloader() {
               size: event.size,
               catboxUrl: event.catboxUrl,
               expiresAt: event.catboxExpiresAt,
-            })
+            });
           }
-          setProgress(null)
-          setStatus("done")
-          break
+          setProgress(null);
+          setStatus("done");
+          break;
         }
         case "error":
-          setProgress(null)
-          setStatus("error")
-          break
+          setProgress(null);
+          setStatus("error");
+          break;
       }
     },
     [addLog],
-  )
+  );
 
   const grab = useCallback(async () => {
-    if (!url.trim() || isRunning) return
+    if (!url.trim() || isRunning) return;
 
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    setStatus("running")
-    if (logFlushTimerRef.current) window.clearTimeout(logFlushTimerRef.current)
-    logFlushTimerRef.current = null
-    pendingLogsRef.current = []
-    setLogs([])
-    setResult(null)
-    setProgress(null)
-    submittedUrlRef.current = url.trim()
+    setStatus("running");
+    if (logFlushTimerRef.current) window.clearTimeout(logFlushTimerRef.current);
+    logFlushTimerRef.current = null;
+    pendingLogsRef.current = [];
+    setLogs([]);
+    setResult(null);
+    setProgress(null);
+    submittedUrlRef.current = url.trim();
 
     try {
       const resp = await fetch("/api/download", {
@@ -159,36 +177,46 @@ export function Downloader() {
           catboxUserhash: saveToCatbox ? catboxUserhash.trim() : "",
         }),
         signal: controller.signal,
-      })
+      });
 
       if (!resp.ok) {
-        const data = await resp.json().catch(() => ({ error: `Request failed (HTTP ${resp.status})` }))
-        addLog({ level: "error", message: data.error ?? "Request failed", timestamp: Date.now() })
-        setStatus("error")
-        return
+        const data = await resp
+          .json()
+          .catch(() => ({ error: `Request failed (HTTP ${resp.status})` }));
+        addLog({
+          level: "error",
+          message: data.error ?? "Request failed",
+          timestamp: Date.now(),
+        });
+        setStatus("error");
+        return;
       }
 
       if (!resp.body) {
-        addLog({ level: "error", message: "No response stream received", timestamp: Date.now() })
-        setStatus("error")
-        return
+        addLog({
+          level: "error",
+          message: "No response stream received",
+          timestamp: Date.now(),
+        });
+        setStatus("error");
+        return;
       }
 
       // Parse NDJSON stream line by line
-      const reader = resp.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.trim()) continue
+          if (!line.trim()) continue;
           try {
-            handleEvent(JSON.parse(line) as StreamEvent)
+            handleEvent(JSON.parse(line) as StreamEvent);
           } catch {
             // skip malformed lines
           }
@@ -196,31 +224,39 @@ export function Downloader() {
       }
       if (buffer.trim()) {
         try {
-          handleEvent(JSON.parse(buffer) as StreamEvent)
+          handleEvent(JSON.parse(buffer) as StreamEvent);
         } catch {
           // skip malformed trailing data
         }
       }
 
       // If stream ended without a result or error event, mark as error
-      setStatus((prev) => (prev === "running" ? "error" : prev))
+      setStatus((prev) => (prev === "running" ? "error" : prev));
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return
+      if (e instanceof DOMException && e.name === "AbortError") return;
       addLog({
         level: "error",
         message: e instanceof Error ? e.message : "Connection lost",
         timestamp: Date.now(),
-      })
-      setStatus("error")
+      });
+      setStatus("error");
     }
-  }, [url, isRunning, addLog, handleEvent, effectiveFormat, saveToCatbox, catboxUserhash])
+  }, [
+    url,
+    isRunning,
+    addLog,
+    handleEvent,
+    effectiveFormat,
+    saveToCatbox,
+    catboxUserhash,
+  ]);
 
   return (
     <div className="flex flex-col gap-4">
       <form
         onSubmit={(e) => {
-          e.preventDefault()
-          grab()
+          e.preventDefault();
+          grab();
         }}
         className="flex flex-col sm:flex-row gap-2"
       >
@@ -263,10 +299,12 @@ export function Downloader() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
         <fieldset className="flex items-center gap-1" disabled={isRunning}>
           <legend className="sr-only">Output format</legend>
-          <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground/60 mr-2">Format</span>
+          <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground/60 mr-2">
+            Format
+          </span>
           {(["pdf", "pptx"] as OutputFormat[]).map((f) => {
-            const disabled = f === "pptx" && pptxDisabled
-            const active = effectiveFormat === f
+            const disabled = f === "pptx" && pptxDisabled;
+            const active = effectiveFormat === f;
             return (
               <label
                 key={f}
@@ -275,7 +313,11 @@ export function Downloader() {
                     ? "border-primary/50 bg-primary/10 text-primary"
                     : "border-border bg-card text-muted-foreground hover:text-foreground"
                 } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
-                title={disabled ? "The rendered Scribd fallback is PDF-only" : undefined}
+                title={
+                  disabled
+                    ? "The rendered Scribd fallback is PDF-only"
+                    : undefined
+                }
               >
                 <input
                   type="radio"
@@ -288,10 +330,12 @@ export function Downloader() {
                 />
                 {f}
               </label>
-            )
+            );
           })}
           {pptxDisabled && (
-            <span className="text-[10px] font-mono text-muted-foreground/50 ml-1">scribd fallback: pdf only</span>
+            <span className="text-[10px] font-mono text-muted-foreground/50 ml-1">
+              scribd fallback: pdf only
+            </span>
           )}
         </fieldset>
 
@@ -339,5 +383,5 @@ export function Downloader() {
 
       <LogConsole logs={logs} isRunning={isRunning} progress={progress} />
     </div>
-  )
+  );
 }
