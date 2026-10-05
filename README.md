@@ -36,3 +36,7 @@ The relevant upstream reference is [Vercel function duration configuration](http
 ## Optional storage
 
 The “Save to catbox.moe” option uploads the generated file after processing. Without a userhash, the anonymous link is temporary; with a userhash, the user’s catbox account controls retention. This storage behavior is separate from the local one-hour temporary file used for the immediate download route.
+
+## License
+
+DocGrab is licensed under the [GNU GPL v3](LICENSE) (GPL-3.0-or-later).
