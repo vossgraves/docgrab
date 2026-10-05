@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { get, put } from "@vercel/blob"
 import crypto from "node:crypto"
 import type { FileExt } from "./store"

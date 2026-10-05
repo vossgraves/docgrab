@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { storeForDownload } from "./delivery"

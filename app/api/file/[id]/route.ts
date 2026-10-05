@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import type { NextRequest } from "next/server"
 import { getFile } from "@/lib/store"
 

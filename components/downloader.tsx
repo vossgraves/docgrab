@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"

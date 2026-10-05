@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { getUserAgent } from "./user-agent"

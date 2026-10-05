@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * Lightweight in-memory sliding-window rate limiter, keyed by client IP.
  *

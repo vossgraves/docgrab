@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { mkdir, writeFile, readFile, readdir, stat, unlink } from "fs/promises"
 import { existsSync } from "fs"
 import path from "path"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * Pure TypeScript PDF builder from JPEG buffers.
  * No external dependencies — embeds JPEGs with DCTDecode filter.

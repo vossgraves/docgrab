@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 import { FileText, Download, Cloud, ExternalLink } from "lucide-react"
 import type { OutputFormat, Platform } from "@/lib/types"

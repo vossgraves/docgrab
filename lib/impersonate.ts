@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * Chrome-TLS fetch fallback for challenge-protected sources.
  *

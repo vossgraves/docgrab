@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { uploadToCatbox } from "./catbox"
 import { putCachedDocument, type CacheMetadata } from "./blob-cache"
 import { saveFile, slugify, type FileExt } from "./store"

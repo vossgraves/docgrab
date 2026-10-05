@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { launchBrowser } from "./browser"
 import { storeForDownload } from "./delivery"
 import { getUserAgent } from "./user-agent"

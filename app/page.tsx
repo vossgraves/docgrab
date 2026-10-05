@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { Downloader } from "@/components/downloader"
 import { History } from "@/components/history"
 import { SITE_URL } from "@/lib/site"

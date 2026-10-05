@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 export async function GET() {
   return new Response("google-site-verification: google097763d9e2c865c1", {
     headers: {

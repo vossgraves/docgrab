@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import type { Logger } from "./types"
 
 // catbox.moe rejects uploads larger than 200 MB; litterbox allows up to 1 GB.

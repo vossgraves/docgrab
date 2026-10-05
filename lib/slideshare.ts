@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { buildPdfFromJpegs, isJpeg } from "./pdf"
 import { buildPptxFromJpegs } from "./pptx"
 import { storeForDownload } from "./delivery"
